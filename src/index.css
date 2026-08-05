@@ -1,0 +1,439 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-red-650: #cb2121;
+  --color-purple-650: #882adb;
+  --color-rose-650: #d01842;
+  --color-slate-650: #3d4b60;
+  --color-indigo-650: #493fdf;
+  
+  --color-slate-150: #e9edf4;
+  --color-slate-350: #b0bdcd;
+  --color-slate-850: #172033;
+  --color-red-550: #e63535;
+  --color-red-505: #ec3e3e;
+}
+
+/* Consistent tactile feedback for every interactive control. This only
+   changes the pressed/focused state; individual selected colours remain
+   controlled by each component's existing state classes. */
+button,
+[role="button"],
+select,
+input[type="checkbox"],
+input[type="radio"] {
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+select:not(:disabled):active {
+  transform: translateY(1px) scale(.975);
+  filter: brightness(.92) saturate(1.08);
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+select:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 3px solid rgba(124, 58, 237, .28);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, .55), 0 8px 24px rgba(79, 70, 229, .16);
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+  filter: grayscale(.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  select,
+  input[type="checkbox"],
+  input[type="radio"] { transition: none; }
+}
+
+/* Custom premium scrollbar and glass effects */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.8);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 1);
+}
+
+/* Studio shell: dark navigation rail + spacious light workspace. Legacy
+   sidebar controls inherit this treatment without changing any workflow. */
+.vidiflow-shell {
+  background: linear-gradient(135deg, #f8fafc 0%, #f4f6fb 52%, #eef2ff 100%);
+}
+
+.vidiflow-sidebar {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(92, 78, 220, .25), transparent 28%),
+    linear-gradient(180deg, #111a3d 0%, #0b1026 38%, #070b1d 100%);
+}
+
+.vidiflow-sidebar .text-slate-600,
+.vidiflow-sidebar .text-slate-500,
+.vidiflow-sidebar .text-slate-700 { color: rgb(203 213 225) !important; }
+.vidiflow-sidebar .text-slate-400 { color: rgb(148 163 184) !important; }
+.vidiflow-sidebar .bg-slate-50,
+.vidiflow-sidebar .bg-indigo-50,
+.vidiflow-sidebar .bg-violet-50,
+.vidiflow-sidebar .bg-emerald-50,
+.vidiflow-sidebar .bg-amber-50 { background-color: transparent !important; }
+.vidiflow-sidebar .border-slate-100,
+.vidiflow-sidebar .border-slate-200,
+.vidiflow-sidebar .border-indigo-100 { border-color: rgba(255,255,255,.10) !important; }
+.vidiflow-nav button { margin: 2px 8px; width: calc(100% - 16px); border-radius: 13px; }
+.vidiflow-nav button:hover { background: rgba(255,255,255,.08); }
+.vidiflow-sidebar .bg-indigo-100,
+.vidiflow-sidebar .bg-violet-100,
+.vidiflow-sidebar .bg-emerald-100,
+.vidiflow-sidebar .bg-amber-100 { background: rgba(255,255,255,.13) !important; color: #e9e7ff !important; }
+
+/* Primary customer controls are intentionally roomy: the studio is used for
+   longer sessions, so labels, inputs and buttons stay readable at a glance. */
+.automation-control-center {
+  font-size: 15px;
+}
+.automation-control-center textarea {
+  font-size: 14px;
+  line-height: 1.55;
+}
+.automation-control-center button:not([class*="p-1"]):not([class*="p-1.5"]) {
+  min-height: 2.75rem;
+}
+
+/* Image is the normal prompt target. Keep it first in the compact target
+   switcher even though the legacy JSX declares the video control first. */
+.automation-control-center section.border-rose-200 .flex.rounded-xl.bg-slate-100 > button:first-child {
+  order: 2;
+}
+.automation-control-center section.border-rose-200 .flex.rounded-xl.bg-slate-100 > button:nth-child(2) {
+  order: 1;
+}
+
+@media (max-width: 1024px) {
+  .vidiflow-sidebar { width: 17rem; }
+}
+
+/* Dark mode intentionally remaps the existing utility-heavy interface instead
+   of maintaining a second layout.  It covers panels, form controls, borders,
+   text and overlays while preserving the workflow's status colours. */
+.theme-dark {
+  background: #0b1220 !important;
+  color: #e5edf8 !important;
+}
+
+.theme-dark .bg-white,
+.theme-dark .bg-slate-50,
+.theme-dark .bg-\[\#F8FAFC\],
+.theme-dark .bg-indigo-50,
+.theme-dark .bg-blue-50,
+.theme-dark .bg-emerald-50,
+.theme-dark .bg-amber-50 {
+  background-color: #121c2d !important;
+}
+
+.theme-dark .bg-slate-100,
+.theme-dark .bg-slate-200,
+.theme-dark .bg-slate-300,
+.theme-dark .bg-indigo-100,
+.theme-dark .bg-blue-100,
+.theme-dark .bg-emerald-100,
+.theme-dark .bg-amber-100 {
+  background-color: #1c2a40 !important;
+}
+
+/* Tailwind opacity variants (for example bg-slate-50/50) have escaped class
+   names, so cover them by class substring as well. */
+.theme-dark [class*="bg-white"],
+.theme-dark [class*="bg-slate-50"],
+.theme-dark [class*="bg-slate-100"] {
+  background-color: #121c2d !important;
+}
+
+.theme-dark [class*="bg-slate-200"],
+.theme-dark [class*="bg-slate-300"] {
+  background-color: #22314a !important;
+}
+
+.theme-dark [class*="bg-indigo-50"],
+.theme-dark [class*="bg-indigo-100"],
+.theme-dark [class*="bg-blue-50"],
+.theme-dark [class*="bg-blue-100"],
+.theme-dark [class*="bg-emerald-50"],
+.theme-dark [class*="bg-amber-50"],
+.theme-dark [class*="bg-rose-50"] {
+  background-color: #1a2940 !important;
+}
+
+.theme-dark [class*="bg-linear-to-"],
+.theme-dark [class*="bg-gradient-to-"] {
+  background-image: none !important;
+  background-color: #121c2d !important;
+}
+
+.theme-dark .storyboard-container,
+.theme-dark .scene-card {
+  background-color: #111b2b !important;
+}
+
+.theme-dark .sticky {
+  background-color: rgba(17, 27, 43, .96) !important;
+}
+
+/* Automation center: retain media previews and make compact controls legible
+   without relying on the broad utility-class dark-mode remap above. */
+.theme-dark .automation-control-center {
+  color: #e7eef9;
+}
+
+.theme-dark .automation-control-center [style*="background-image"] {
+  background-color: #0a1220 !important;
+}
+
+/* The child is the title gradient over a style thumbnail.  The generic
+   dark-mode gradient reset must never turn it into an opaque cover. */
+.theme-dark .automation-control-center [style*="background-image"] > div {
+  background-color: transparent !important;
+  background-image: linear-gradient(to top, rgba(0, 0, 0, .84), rgba(0, 0, 0, .06)) !important;
+}
+
+.theme-dark .automation-control-center .rounded-2xl,
+.theme-dark .automation-control-center .rounded-xl {
+  border-color: #31425e;
+}
+
+.theme-dark .automation-control-center .text-slate-500,
+.theme-dark .automation-control-center .text-slate-400 {
+  color: #aebcd0 !important;
+}
+
+/* Automation: keep the scene setup deliberately simple for customers. */
+section.rounded-2xl.border-rose-200.bg-white > label,
+section.rounded-2xl.border-rose-200.bg-white > div:nth-of-type(1),
+section.rounded-2xl.border-rose-200.bg-white > div:nth-of-type(2),
+section.rounded-2xl.border-rose-200.bg-white > div:nth-of-type(3),
+section.rounded-2xl.border-rose-200.bg-white > div:nth-of-type(5) {
+  display: none;
+}
+
+.theme-dark .border-slate-100,
+.theme-dark .border-slate-200,
+.theme-dark .border-slate-300,
+.theme-dark .border-indigo-100,
+.theme-dark .border-indigo-200,
+.theme-dark .border-blue-200,
+.theme-dark .border-emerald-200,
+.theme-dark .border-amber-200 {
+  border-color: #2d3d56 !important;
+}
+
+.theme-dark .text-slate-900,
+.theme-dark .text-slate-800,
+.theme-dark .text-slate-700,
+.theme-dark .text-slate-600,
+.theme-dark .text-slate-500,
+.theme-dark .text-slate-400 {
+  color: #d6e0ef !important;
+}
+
+.theme-dark input,
+.theme-dark textarea,
+.theme-dark select {
+  background-color: #0e1726 !important;
+  color: #e5edf8 !important;
+  border-color: #34445e !important;
+}
+
+.theme-dark input::placeholder,
+.theme-dark textarea::placeholder {
+  color: #8291a8 !important;
+}
+
+.theme-dark .shadow-sm,
+.theme-dark .shadow-md,
+.theme-dark .shadow-lg,
+.theme-dark .shadow-xs {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28) !important;
+}
+
+/* Custom styles stay compact in the gallery. Their full prompt is edited in
+   the form, and the two actions remain available without relying on hover. */
+.automation-control-center .group.relative.overflow-hidden > .absolute.right-2.top-2 {
+  opacity: 1;
+}
+
+/* Reference images have one source of truth in the character profile. */
+.automation-settings-panel > div.space-y-4 > div.space-y-1\.5 {
+  display: none;
+}
+
+/* Dialogue-video setup lives in Phong cách & nhân vật; keep the media tab
+   focused on engine/output controls only. */
+.automation-settings-panel > div.space-y-4 > section.border-violet-200.bg-violet-50\/60 {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  /* On the visual-setup screen, put the style selector and media goal side
+     by side; profile and all detailed panels retain their own full row. */
+  .automation-settings-panel:has(section.border-rose-200) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+  }
+  .automation-settings-panel:has(section.border-rose-200) > div.space-y-4 {
+    display: contents;
+  }
+  .automation-settings-panel:has(section.border-rose-200) > section,
+  .automation-settings-panel:has(section.border-rose-200) > div:not(.space-y-4) {
+    grid-column: 1 / -1;
+  }
+  .automation-settings-panel:has(section.border-rose-200) > section.border-indigo-200.bg-white,
+  .automation-settings-panel:has(section.border-rose-200) section.border-rose-200 {
+    grid-column: auto;
+    margin: 0 !important;
+  }
+}
+
+.theme-dark ::-webkit-scrollbar-track { background: #101a2a; }
+.theme-dark ::-webkit-scrollbar-thumb { background: #42536d; }
+
+/* Update Center and Social Publisher have their own dark surfaces.  The
+   generic utility remap above is intentionally broad, so these two newer
+   screens opt back into a higher-contrast, violet studio treatment. */
+.theme-dark .vidiflow-update-center {
+  background-color: rgba(2, 6, 23, .78) !important;
+}
+
+.theme-dark .vidiflow-update-dialog {
+  background: linear-gradient(145deg, #10182b 0%, #0c1324 100%) !important;
+  border: 1px solid #33415d;
+  color: #e8eef9;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .58) !important;
+}
+
+.theme-dark .vidiflow-update-dialog header,
+.theme-dark .vidiflow-update-dialog footer {
+  border-color: #2d3b56 !important;
+  background: rgba(15, 23, 42, .72);
+}
+
+.theme-dark .vidiflow-update-dialog .bg-white,
+.theme-dark .vidiflow-update-dialog .bg-slate-50 {
+  background-color: #121c2d !important;
+}
+
+.theme-dark .vidiflow-update-dialog .bg-violet-50 {
+  background: linear-gradient(135deg, rgba(91, 33, 182, .36), rgba(30, 41, 86, .48)) !important;
+  border: 1px solid rgba(167, 139, 250, .25);
+}
+
+.theme-dark .vidiflow-update-dialog .bg-emerald-50 {
+  background-color: rgba(6, 78, 59, .32) !important;
+  color: #a7f3d0 !important;
+}
+
+.theme-dark .vidiflow-update-dialog .bg-rose-50 {
+  background-color: rgba(127, 29, 29, .3) !important;
+  color: #fecaca !important;
+}
+
+.theme-dark .vidiflow-update-dialog .text-slate-900,
+.theme-dark .vidiflow-update-dialog .text-slate-700,
+.theme-dark .vidiflow-update-dialog .text-slate-600,
+.theme-dark .vidiflow-update-dialog .text-slate-500 {
+  color: #dbe7f7 !important;
+}
+
+.theme-dark .vidiflow-update-dialog .border-slate-200 {
+  border-color: #33415d !important;
+}
+
+.theme-dark .vidiflow-social-publisher {
+  color: #e6edf9;
+}
+
+.theme-dark .vidiflow-social-publisher > section:first-child {
+  background: radial-gradient(circle at top right, #b026d3 0%, #54209c 34%, #0a1020 82%) !important;
+  border: 1px solid rgba(196, 181, 253, .34);
+  box-shadow: 0 22px 56px rgba(0, 0, 0, .38) !important;
+}
+
+.theme-dark .vidiflow-social-publisher > section:nth-child(2) article {
+  background: linear-gradient(155deg, #142139, #10192b) !important;
+  border-color: #33415d !important;
+  color: #dbeafe !important;
+}
+
+.theme-dark .vidiflow-social-publisher > section:nth-child(2) article h4,
+.theme-dark .vidiflow-social-publisher > section:nth-child(2) article p {
+  color: #e2e8f0 !important;
+}
+
+.theme-dark .vidiflow-social-publisher > section:nth-child(3) {
+  background: linear-gradient(145deg, #121c2d, #0e1626) !important;
+  border-color: #33415d !important;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .26) !important;
+}
+
+.theme-dark .vidiflow-social-publisher > section:nth-child(3) .border-dashed {
+  background: rgba(91, 33, 182, .17) !important;
+  border-color: rgba(167, 139, 250, .52) !important;
+}
+
+.theme-dark .vidiflow-social-publisher section:not(:first-child),
+.theme-dark .vidiflow-social-publisher article {
+  background-color: #10192b !important;
+  border-color: #33415d !important;
+}
+
+.theme-dark .vidiflow-social-publisher input,
+.theme-dark .vidiflow-social-publisher textarea,
+.theme-dark .vidiflow-social-publisher select {
+  background-color: #0b1324 !important;
+  border-color: #3d4c69 !important;
+  color: #e5edf9 !important;
+}
+
+.theme-dark .vidiflow-social-publisher .text-slate-900,
+.theme-dark .vidiflow-social-publisher .text-slate-800,
+.theme-dark .vidiflow-social-publisher .text-slate-700,
+.theme-dark .vidiflow-social-publisher .text-slate-600,
+.theme-dark .vidiflow-social-publisher .text-slate-500 {
+  color: #dbe7f7 !important;
+}
+
+.theme-dark .vidiflow-social-publisher .bg-slate-50,
+.theme-dark .vidiflow-social-publisher .bg-slate-100 {
+  background-color: #17233a !important;
+}

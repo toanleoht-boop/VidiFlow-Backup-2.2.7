@@ -1,0 +1,11 @@
+VidiFlow OneClick v2.2.1
+
+- Cải thiện độ ổn định khi tạo ảnh/video bằng Flow, Gemini và API; tự thử lại các lỗi tạm thời trước khi báo lỗi.
+- Đồng bộ ảnh tham chiếu theo đúng nhân vật xuất hiện trong từng prompt và hạn chế tải lại ảnh trong cùng dự án.
+- Sửa số Chrome và số tab làm việc theo đúng cấu hình; tái sử dụng tab, không mở chồng tab sau mỗi lượt.
+- Sửa tải Voice dung lượng lớn và đường dẫn tiếng Việt.
+- Cải thiện đồng bộ Voice với media khi một phân cảnh có nhiều prompt.
+- Bổ sung lựa chọn dùng ảnh thay thế tại đúng vị trí khi video tạo lỗi nhiều lần.
+- Cải thiện xem lại kết quả media, ảnh Thumbnail, style preview và trạng thái bản quyền Trial.
+- Tối ưu lưu, tải lại dự án và xử lý thư mục dự án mới.
+- Bản Desktop FULL đã tích hợp sẵn Python, Node/Electron, FFmpeg, yt-dlp và Whisper.

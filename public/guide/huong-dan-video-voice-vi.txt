@@ -1,0 +1,23 @@
+Chào mừng bạn đến với VidiFlow OneClick Content Studio. Đây là công cụ giúp bạn biến ý tưởng, kịch bản hoặc một đường link video thành bộ nội dung hoàn chỉnh: kịch bản, hình ảnh hoặc video minh họa, giọng đọc, thumbnail, tiêu đề và video final.
+
+VidiFlow có hai cách làm việc. Tạo video tự động dành cho khi bạn muốn thiết lập một lần rồi để tool xử lý toàn bộ. Tạo video từng bước dành cho khi bạn muốn kiểm tra kịch bản, ảnh, voice và nội dung đăng tải ở từng chặng trước khi đi tiếp. Dù chọn cách nào, dự án luôn được lưu riêng, có thể mở lại, chỉnh sửa hoặc tạo lại đúng phần bạn chưa hài lòng.
+
+Trong video này, chúng ta sẽ đi từ lúc bắt đầu một dự án cho tới khi nhận được video hoàn chỉnh.
+
+Đầu tiên, tại màn hình Tạo video tự động, hãy chọn một thư mục dự án riêng. Đây là nơi tool lưu kịch bản, ảnh hoặc video từng cảnh, file giọng đọc, thumbnail và video final. Mỗi video nên có một thư mục riêng để dữ liệu không bị lẫn vào nhau.
+
+Tiếp theo, mở tab Nội dung. Bạn có thể dán một kịch bản có sẵn, mô tả ý tưởng để AI viết kịch bản, hoặc dán link YouTube, TikTok hay Facebook. Sau đó chọn ngôn ngữ, thể loại và các yêu cầu bổ sung nếu cần. Khi mọi thiết lập đã sẵn sàng, kịch bản sẽ được dùng xuyên suốt các bước sau.
+
+Ở tab Phong cách và nhân vật, chọn phong cách hình ảnh phù hợp với kênh. Bạn có thể dùng ảnh tham chiếu hoặc lưu hồ sơ nhân vật để các cảnh có nhân vật và màu sắc đồng nhất. Phong cách chỉ quyết định cách thể hiện hình ảnh; nội dung cảnh vẫn bám theo kịch bản và câu thoại.
+
+Trong tab Ảnh và Video, chọn tạo ảnh hoặc video, tỷ lệ khung hình và nền tảng tạo. Video YouTube thông thường nên dùng tỷ lệ mười sáu trên chín. Shorts hoặc TikTok nên dùng tỷ lệ chín trên mười sáu. Nếu tạo ảnh, tool sẽ sinh ảnh minh họa cho từng câu hoặc từng đoạn kịch bản.
+
+Sau đó, ở tab Giọng đọc, bạn có thể dùng Giọng Premium đã chọn hoặc tải lên file voice đã tạo bên ngoài. Chọn tốc độ, cao độ và cảm xúc phù hợp. Giữ nguyên một giọng đọc cho cả video giúp nội dung tự nhiên và nhất quán hơn.
+
+Tại tab Tiêu đề và Đăng tải, thiết lập phong cách tiêu đề, từ khóa, thumbnail và phần chữ hiển thị trên thumbnail nếu cần. Tool sẽ chuẩn bị tiêu đề và mô tả dựa trên nội dung kịch bản. Bạn luôn có thể kiểm tra và chỉnh sửa trước khi xuất bản.
+
+Nếu muốn kiểm soát kỹ hơn, hãy dùng Tạo video từng bước. Phần một tạo và cho phép bạn review kịch bản. Phần hai tạo phong cách, phân cảnh và ảnh hoặc video. Tại đây, bạn xem trực tiếp từng ảnh, sửa prompt và tạo lại riêng cảnh chưa ưng ý. Phần ba tạo voice, tiêu đề, mô tả và thumbnail. Phần bốn dùng dữ liệu đã duyệt để tạo video đầu ra.
+
+Khi hoàn tất, mở Kết quả và Theo dõi. Bạn có thể xem thumbnail, kiểm tra video final, tải file về máy và mở lại dự án bất cứ lúc nào. Nếu một cảnh còn thiếu, chỉ tạo lại đúng cảnh đó; những kết quả đã hoàn thành vẫn được giữ lại.
+
+Chúc bạn tạo được những video rõ ràng, đồng nhất và sẵn sàng đăng tải với VidiFlow OneClick Content Studio.

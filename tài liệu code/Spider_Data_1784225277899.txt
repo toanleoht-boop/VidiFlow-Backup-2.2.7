@@ -1,0 +1,6 @@
+[outer html ảnh tham chiếu]
+<img src="/fx/api/trpc/media.getMediaUrlRedirect?name=eb58c363-a6f2-4f60-9be9-bf42c58e9caa" alt="Hình ảnh được tạo" draggable="false" class="sc-f803b119-0 bhyZfD sc-5923b123-1 bKfeut" crossorigin="anonymous" style="opacity: 1;">
+-------------------------
+[outer html ảnh tạo hoàn chỉnh]
+<img src="/fx/api/trpc/media.getMediaUrlRedirect?name=89b1480b-0d79-42b1-8880-52b67c01aa74" alt="Hình ảnh được tạo" draggable="false" class="sc-f803b119-0 bhyZfD sc-5923b123-1 bKfeut" crossorigin="anonymous" style="opacity: 1;">
+-------------------------

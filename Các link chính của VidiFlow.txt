@@ -1,0 +1,12 @@
+Các link chính của VidiFlow:
+
+- Trang chủ: https://vidiflow.site/
+- Bảng giá: https://vidiflow.site/#pricing
+- Tải ứng dụng: https://vidiflow.site/#downloads
+- Tài khoản & key của khách: https://vidiflow.site/account.html
+- Thanh toán Gói khởi đầu: https://vidiflow.site/checkout.html?plan=starter
+- Thanh toán Gói Pro tháng: https://vidiflow.site/checkout.html?plan=monthly
+- Thanh toán Gói vĩnh viễn: https://vidiflow.site/checkout.html?plan=lifetime
+- Dashboard giao diện: https://vidiflow.site/dashboard.html#licenses
+- Admin quản lý key, API, link tải, cập nhật: https://vidiflow.site/api/admin/
+- Kiểm tra API hoạt động: https://vidiflow.site/api/v1/health

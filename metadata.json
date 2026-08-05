@@ -1,0 +1,8 @@
+{
+  "name": "YT Video Workflow 2026 Final 3 Step",
+  "description": "Hệ thống tự động hóa và hỗ trợ quy trình sản xuất video YouTube 2026: Chuẩn hóa kịch bản, viết Hook, chia phân cảnh tạo prompt ảnh AI, tối ưu SEO và Seeding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

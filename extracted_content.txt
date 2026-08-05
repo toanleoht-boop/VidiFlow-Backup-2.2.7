@@ -1,0 +1,64 @@
+Created At: 2026-07-16T12:01:08Z
+Completed At: 2026-07-16T12:01:09Z
+
+				The command completed successfully.
+				Output:
+				
+  src\server\services\imageGeneratorService.ts:164:const batchPagesConfigs = new WeakMap<Page, string>();
+  src\server\services\imageGeneratorService.ts:165:
+  src\server\services\imageGeneratorService.ts:166:export let isBatchCancelled = false;
+  src\server\services\imageGeneratorService.ts:167:export const setBatchCancelled = (val: boolean) => { 
+isBatchCancelled = val; };
+  src\server\services\imageGeneratorService.ts:168:
+> src\server\services\imageGeneratorService.ts:169:export async function generateImageWithPlaywright(options: 
+ImageGeneratorOptions): Promise<ImageGeneratorResult> {
+  src\server\services\imageGeneratorService.ts:170:  const { prompt, style, visualConfig, sandboxConfig = {} } = 
+options;
+  src\server\services\imageGeneratorService.ts:171:
+  src\server\services\imageGeneratorService.ts:172:  const mode = visualConfig?.generationMode || 
+ImageGenerationMode.GeminiChat;
+  src\server\services\imageGeneratorService.ts:173:  if (mode === ImageGenerationMode.GeminiChat || (mode as any) === 
+"gemini_chat") {
+  src\server\services\imageGeneratorService.ts:174:    return generateImageWithGeminiChat(options);
+  src\server\services\imageGeneratorService.ts:175:  }
+  src\server\services\imageGeneratorService.ts:176:
+  src\server\services\imageGeneratorService.ts:177:  const isStickman = !![style, prompt].some((str) => str && 
+STICKMAN_KEYWORDS.some((kw) => str.toLowerCase().includes(kw)));
+  src\server\services\imageGeneratorService.ts:178:
+  src\server\services\imageGeneratorService.ts:179:  let finalPrompt = prompt || "";
+  src\server\services\imageGeneratorService.ts:180:  if (isStickman) {
+  src\server\services\imageGeneratorService.ts:181:    const stickmanStyleModifiers = STICKMAN_STYLE_MODIFIERS;
+  src\server\services\imageGeneratorService.ts:182:    finalPrompt = `${finalPrompt}, ${stickmanStyleModifiers}`;
+  src\server\services\imageGeneratorSer
+<truncated 2057 bytes>
+Delay(visualConfig);
+  src\server\services\imageGeneratorService.ts:815:    } catch (e: any) {
+  src\server\services\imageGeneratorService.ts:816:      const errRes = { sceneId: item.sceneId, success: false, 
+base64: null, fallbackUrl: "", warning: e.message };
+  src\server\services\imageGeneratorService.ts:817:      results.push(errRes);
+  src\server\services\imageGeneratorService.ts:818:      if (onProgress) onProgress(errRes);
+  src\server\services\imageGeneratorService.ts:819:    }
+  src\server\services\imageGeneratorService.ts:820:  }
+  src\server\services\imageGeneratorService.ts:821:  return results;
+  src\server\services\imageGeneratorService.ts:822:}
+  src\server\services\imageGeneratorService.ts:823:
+  src\server\services\imageGeneratorService.ts:824:export async function generateBatchImagesWithGeminiChat(items: 
+BatchImageItem[], visualConfig: any, style?: string, onProgress?: (result: BatchImageResult) => void): 
+Promise<BatchImageResult[]> {
+  src\server\services\imageGeneratorService.ts:825:  if (!items || items.length === 0) return [];
+  src\server\services\imageGeneratorService.ts:826:  
+  src\server\services\imageGeneratorService.ts:827:  const isVideo = visualConfig?.generateType === GenerateType.Video 
+|| visualConfig?.generateType === "video";
+  src\server\services\imageGeneratorService.ts:828:  let concurrency = visualConfig?.threadCount || 
+GEMINI_CHAT_SPEED_TAB_COUNT[visualConfig?.geminiChatSpeed || GeminiChatSpeed.Slow] || 1;
+  src\server\services\imageGeneratorService.ts:829:  
+  src\server\services\imageGeneratorService.ts:830:  if (isVideo) {
+  src\server\services\imageGeneratorService.ts:831:    concurrency = Math.min(concurrency, 2); // Khuy?n ngh? ch? ch?y 
+2 lu?ng cho video tr�n Gemini
+  src\server\services\imageGeneratorService.ts:832:  }
+  src\server\services\imageGeneratorService.ts:833:  
+  src\server\services\imageGeneratorService.ts:834:  const maxTabs = Math.min(items.length, concurrency);
+  src\server\services\imageGeneratorService.ts:835:
+
+
+

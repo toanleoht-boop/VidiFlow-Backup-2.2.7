@@ -1,0 +1,33 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+*.zip
+backup*/
+.gemini/
+# Local runtime, generated artifacts, and customer data
+.codex-*/
+.vite-runtime-cache/
+data/
+logs/
+temp/
+release/
+windows_runtime/
+packaging/runtime/
+packaging/build/
+packaging/dist/
+*.exe
+*.rar
+*.7z
+*.sqlite
+*.db
+server.ts.before-*
+youtube_cookies_*.txt
+# Files containing local API examples or obsolete reconstruction data
+reconstruct.cjs
+tài liệu code/api_vittheo-tai_lieu.txt
