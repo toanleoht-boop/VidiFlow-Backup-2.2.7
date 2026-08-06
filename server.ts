@@ -129,6 +129,74 @@ const FFMPEG_PATH = typeof ffmpegStatic === "string" && ffmpegStatic
   ? ffmpegStatic
   : "ffmpeg";
 
+const WATERMARK_TOOL_PACKAGE = "remove-ai-watermarks[video,migan]";
+
+function runWatermarkProcess(command: string, args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      windowsHide: true,
+      shell: false,
+      // The cleaner prints the input/output path. Windows Python otherwise
+      // inherits cp1252 and crashes on Vietnamese project names before it can
+      // write the cleaned media.
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("Quá thời gian xử lý watermark."));
+    }, timeoutMs);
+    child.stdout.on("data", chunk => { stdout += String(chunk); });
+    child.stderr.on("data", chunk => { stderr += String(chunk); });
+    child.once("error", error => { clearTimeout(timer); reject(error); });
+    child.once("close", code => {
+      clearTimeout(timer);
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
+async function cleanGeneratedMedia(filePath: string, mediaType: "image" | "video", backend: "cv2" | "migan" = "migan") {
+  const extension = path.extname(filePath) || (mediaType === "video" ? ".mp4" : ".jpg");
+  const base = filePath.slice(0, filePath.length - extension.length);
+  const backupPath = `${base}.original${extension}`;
+  const temporaryPath = `${base}.watermark-cleaning${extension}`;
+  const uvCandidates = [
+    process.env.UV_PATH,
+    path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "uv.exe" : "uv"),
+    process.platform === "win32" ? "uv.exe" : "uv",
+  ].filter((candidate): candidate is string => !!candidate);
+  const args = mediaType === "video"
+    ? ["tool", "run", "--from", WATERMARK_TOOL_PACKAGE, "remove-ai-watermarks", "video", "all", filePath, "-o", temporaryPath, "--mark", "veo", "--backend", backend]
+    : ["tool", "run", "--from", WATERMARK_TOOL_PACKAGE, "remove-ai-watermarks", "visible", filePath, "-o", temporaryPath, "--backend", backend];
+  let result: { code: number; stdout: string; stderr: string } | null = null;
+  let lastError: unknown = null;
+  for (const uvPath of uvCandidates) {
+    try {
+      result = await runWatermarkProcess(uvPath, args, mediaType === "video" ? 30 * 60_000 : 10 * 60_000);
+      break;
+    } catch (error: any) {
+      lastError = error;
+      if (error?.code !== "ENOENT") break;
+    }
+  }
+  if (!result) throw lastError instanceof Error ? lastError : new Error("Không tìm thấy uv để chạy bộ làm sạch watermark.");
+  const combinedLog = `${result.stdout}\n${result.stderr}`.trim();
+  if (mediaType === "image" && !fs.existsSync(temporaryPath) && /No known visible mark detected/i.test(combinedLog)) {
+    return { path: filePath, backupPath: null, cleaned: false, log: result.stdout.trim() };
+  }
+  if (result.code !== 0) {
+    try { if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath); } catch {}
+    throw new Error((result.stderr || result.stdout).trim().split(/\r?\n/).slice(-8).join("\n") || "Không thể làm sạch watermark.");
+  }
+  if (!fs.existsSync(temporaryPath)) return { path: filePath, backupPath: null, cleaned: false, log: result.stdout.trim() };
+  if (!fs.existsSync(backupPath)) fs.copyFileSync(filePath, backupPath);
+  fs.copyFileSync(temporaryPath, filePath);
+  fs.unlinkSync(temporaryPath);
+  return { path: filePath, backupPath, cleaned: true, log: result.stdout.trim() };
+}
+
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
@@ -4418,9 +4486,9 @@ app.post("/api/add-thumbnail-text", async (req, res) => {
   // not through a shell).
   const drawText = safeText.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/:/g, "\\:");
   const tempPath = outputPath + ".text-overlay.tmp.jpg";
-  const fontFile = "C\\\\:/Windows/Fonts/arialbd.ttf";
-  const filter = "drawbox=x=0:y=h*0.68:w=w:h=h*0.32:color=black@0.46:t=fill," +
-    "drawtext=fontfile='" + fontFile + "':text='" + drawText + "':fontcolor=white:fontsize=h/10:borderw=5:bordercolor=black@0.9:x=(w-text_w)/2:y=h*0.78";
+  const fontFile = "C\\:/Windows/Fonts/arialbd.ttf";
+  const filter = "drawbox=x=0:y=ih*0.68:w=iw:h=ih*0.32:color=black@0.46:t=fill," +
+    "drawtext=fontfile='" + fontFile + "':text='" + drawText + "':fontcolor=white:fontsize=main_h/10:borderw=5:bordercolor=black@0.9:x=(main_w-text_w)/2:y=main_h*0.78";
   try {
     await new Promise<void>((resolve, reject) => {
       const child = spawn(FFMPEG_PATH, ["-i", inputPath, "-vf", filter, "-frames:v", "1", "-q:v", "2", "-y", tempPath], { windowsHide: true });
@@ -4479,7 +4547,7 @@ app.post("/api/generate-seo-seeding", async (req, res) => {
       if (thumbnailCustomText && thumbnailCustomText.trim()) {
         textInstruction = `\n[Cực Kỳ Quan Trọng] YÊU CẦU VỀ TEXT/CHỮ TRÊN THUMBNAIL: Hãy sử dụng CHÍNH XÁC câu chữ này để đặt lên ảnh thumbnail, ghi vào thuộc tính "thumbnailText": "${thumbnailCustomText.trim()}". Trong "imagePrompt" hãy miêu tả vị trí/style chữ to rõ, bắt mắt hiển thị chữ này.`;
       } else {
-        textInstruction = `\n[Cực Kỳ Quan Trọng] YÊU CẦU VỀ TEXT/CHỮ TRÊN THUMBNAIL: Hãy tạo 1 câu chữ ngắn (tối đa 3-5 từ) cực kỳ kịch tính, tò mò để đặt lên ảnh thumbnail, ghi vào thuộc tính "thumbnailText". Trong "imagePrompt" hãy miêu tả vị trí/style chữ to rõ, bắt mắt.`;
+        textInstruction = `\n[THUMBNAIL TEXT — AUTO SELECT FROM SCRIPT] Do not leave thumbnailText blank. Analyze the actual script’s central conflict, concrete event, strongest surprise, or viewer benefit, then select ONE natural Vietnamese phrase of exactly 3–5 words for thumbnailText. It must be specific to this script (not a generic slogan and not merely the SEO title), compelling but truthful, easy to read at small size, with no quote marks, emoji, hashtags, or trailing punctuation. In imagePrompt, explicitly place this exact phrase as large, bold, high-contrast in-image typography.`;
       }
     }
 
@@ -4606,6 +4674,13 @@ app.post("/api/generate-seo-seeding", async (req, res) => {
     }
 
     if (aiPassed && parsedData) {
+      // Auto-selected thumbnail text is derived from the script, never recycled from the title.
+      if (thumbnailHasText !== false && !(thumbnailCustomText && thumbnailCustomText.trim())) {
+        const concept = parsedData.thumbnailConcept || (parsedData.thumbnailConcept = {});
+        const selected = String(concept.thumbnailText || "").replace(/[\r\n]+/g, " ").trim().split(/\s+/).slice(0, 5).join(" ");
+        const fallbackTopic = String(targetKeywords || script).replace(/\s+/g, " ").trim().split(/\s+/).slice(0, 4).join(" ");
+        concept.thumbnailText = selected || fallbackTopic || "KHÁM PHÁ BÍ ẨN";
+      }
       res.json({
         ...parsedData,
         isProgrammaticFallback: false
@@ -5815,7 +5890,14 @@ function readTimelineScenes(scriptPath: string): TimelineScene[] {
 
 function getTimelineMediaFiles(directory: string) {
   if (!directory || !fs.existsSync(directory)) return [];
-  return fs.readdirSync(directory).filter(file => /\.(?:jpe?g|png|mp4)$/i.test(file));
+  return fs.readdirSync(directory).filter(isUsableGeneratedMediaFile);
+}
+
+// Backups and working files created by watermark removal must never be used
+// as timeline assets, previews, or render inputs.
+function isUsableGeneratedMediaFile(file: string) {
+  return /\.(?:jpe?g|png|webp|mp4|mov)$/i.test(file)
+    && !/\.(?:original|watermark-cleaning)\.(?:jpe?g|png|webp|mp4|mov)$/i.test(file);
 }
 
 function resolveTimelineMediaDir(directory: string) {
@@ -6322,8 +6404,8 @@ app.post("/api/timeline/project-files", (req, res) => {
     const script = scriptCandidates.map(file => path.join(root, file)).find(file => fs.existsSync(file)) || path.join(root, "script.txt");
     const imageDir = path.join(root, "img");
     const videoDir = path.join(root, "vid");
-    const imageCount = fs.existsSync(imageDir) ? fs.readdirSync(imageDir).filter(file => /\.(?:jpe?g|png)$/i.test(file)).length : 0;
-    const videoCount = fs.existsSync(videoDir) ? fs.readdirSync(videoDir).filter(file => /\.mp4$/i.test(file)).length : 0;
+    const imageCount = fs.existsSync(imageDir) ? fs.readdirSync(imageDir).filter(file => isUsableGeneratedMediaFile(file) && /\.(?:jpe?g|png|webp)$/i.test(file)).length : 0;
+    const videoCount = fs.existsSync(videoDir) ? fs.readdirSync(videoDir).filter(file => isUsableGeneratedMediaFile(file) && /\.(?:mp4|mov)$/i.test(file)).length : 0;
     const mediaDir = imageCount ? imageDir : (videoCount ? videoDir : imageDir);
     // The user requested this exact folder name. It is created before any
     // slicing so the first test can be run without a manual folder picker.
@@ -6382,13 +6464,35 @@ app.post("/api/timeline/run-command", (req, res) => {
           if (!scenes.length) throw new Error("Kịch bản chưa có nội dung thoại để cắt voice.");
           const requestedMediaDir = String(params?.imgdir || "").trim();
           const mediaDir = resolveTimelineMediaDir(requestedMediaDir);
-          const mediaCount = getTimelineMediaFiles(mediaDir).length;
+          const allMediaFiles = getTimelineMediaFiles(mediaDir);
+          const normalizeCode = (value: unknown) => String(value || "")
+            .toUpperCase().replace(/[^P\d]+/g, "_").replace(/^_+|_+$/g, "");
+          const scriptedCodes = new Set(scenes.map(scene => normalizeCode(scene.code)).filter(Boolean));
+          const scriptedMediaFiles = scriptedCodes.size === scenes.length
+            ? allMediaFiles.filter(file => {
+                const match = file.match(/P(\d+)[._-](\d+)/i);
+                return match && scriptedCodes.has(normalizeCode(`P${match[1]}_${match[2]}`));
+              })
+            : [];
+          const mediaFiles = scriptedMediaFiles.length === scriptedCodes.size && scriptedCodes.size > 0
+            ? scriptedMediaFiles
+            : allMediaFiles;
+          const mediaCount = mediaFiles.length;
+          if (mediaFiles.length < allMediaFiles.length) {
+            send("log", { message: `Đã chọn đúng ${mediaFiles.length} media theo script và bỏ qua ${allMediaFiles.length - mediaFiles.length} file cũ/ngoài danh sách prompt.` });
+          }
           if (mediaCount && scenes.length === 1 && mediaCount > 1) {
             scenes = splitSceneTextForMedia(scenes, mediaCount);
             send("log", { message: `Kịch bản chưa chia cảnh; đã chia theo ${mediaCount} ảnh/video hiện có để khớp timeline.` });
+          } else if (mediaCount && scenes.length !== mediaCount) {
+            const expandedScenes = expandTimelineScenesForMedia(scenes, mediaFiles);
+            if (expandedScenes.length === mediaCount) {
+              send("log", { message: `Đã mở rộng ${scenes.length} cảnh thoại thành ${mediaCount} đoạn theo mã prompt/media để khớp timeline.` });
+              scenes = expandedScenes;
+            }
           }
           if (mediaCount && scenes.length !== mediaCount) {
-            throw new Error(`Kịch bản có ${scenes.length} cảnh nhưng thư mục media có ${mediaCount} file. Hãy tạo đủ cảnh tương ứng trước khi cắt voice.`);
+            throw new Error(`Không thể ghép an toàn: kịch bản có ${scenes.length} cảnh nhưng thư mục media có ${mediaCount} file hợp lệ. Hãy kiểm tra media cũ hoặc file không có mã P... trước khi cắt voice.`);
           }
           fs.mkdirSync(outputDir, { recursive: true });
           for (const file of fs.readdirSync(outputDir)) {
@@ -6584,8 +6688,8 @@ app.post("/api/render-ffmpeg", async (req, res) => {
         ? ['.mp4', '.mov', '.jpg', '.jpeg', '.png', '.webp']
         : ['.jpg', '.jpeg', '.png', '.webp'];
     const resolvedImgDir = path.resolve(imgDir);
-    const images = fs.existsSync(resolvedImgDir)
-      ? fs.readdirSync(resolvedImgDir).filter(f => validMediaExts.some(ext => f.toLowerCase().endsWith(ext))).sort(naturalSort)
+    let images = fs.existsSync(resolvedImgDir)
+      ? fs.readdirSync(resolvedImgDir).filter(f => isUsableGeneratedMediaFile(f) && validMediaExts.some(ext => f.toLowerCase().endsWith(ext))).sort(naturalSort)
       : [];
     
     const validVoiceExts = ['.mp3', '.wav'];
@@ -6679,6 +6783,19 @@ app.post("/api/render-ffmpeg", async (req, res) => {
     if (!retainVideoAudio && !fs.existsSync(manifestPath)) throw new Error("Chưa có voice_manifest.json. Hãy chạy Cắt voice trước để giữ đúng timeline voice gốc.");
     const manifest = retainVideoAudio ? { scenes: [] } : JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     let timeline = Array.isArray(manifest.scenes) ? manifest.scenes : [];
+    const timelineCodes = new Set(timeline.map((entry: any) => String(entry?.code || "")
+      .toUpperCase().replace(/[^P\d]+/g, "_").replace(/^_+|_+$/g, "")).filter(Boolean));
+    if (timelineCodes.size === timeline.length && images.length !== timeline.length) {
+      const matchingImages = images.filter(file => {
+        const match = file.match(/P(\d+)[._-](\d+)/i);
+        const code = match ? `P${match[1]}_${match[2]}`.toUpperCase() : "";
+        return code && timelineCodes.has(code);
+      });
+      if (matchingImages.length === timeline.length) {
+        sendLog(`-> Đã chọn đúng ${matchingImages.length} media theo voice manifest và bỏ qua ${images.length - matchingImages.length} file cũ/ngoài script.`);
+        images = matchingImages;
+      }
+    }
     const sourceAudio = retainVideoAudio ? "" : String(originalAudio || manifest.sourceAudio || "").trim();
     const sourceDurationMs = sourceAudio && fs.existsSync(sourceAudio) ? await getAudioDurationMs(sourceAudio) : 0;
     if (retainVideoAudio) {
@@ -7168,6 +7285,24 @@ app.post("/api/download-audio", async (req, res) => {
   }
 });
 
+app.post("/api/clean-ai-watermark", async (req, res) => {
+  try {
+    const rawPath = String(req.body?.path || "").trim();
+    if (!rawPath) return res.status(400).json({ success: false, error: "Thiếu đường dẫn media cần làm sạch." });
+    const filePath = resolveCompatibleProjectPath(rawPath);
+    const mediaType = req.body?.mediaType === "video" ? "video" : "image";
+    const backend = req.body?.backend === "cv2" ? "cv2" : "migan";
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return res.status(404).json({ success: false, error: "Không tìm thấy media cần làm sạch." });
+    }
+    const result = await cleanGeneratedMedia(filePath, mediaType, backend);
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("[AI watermark cleaner]", error);
+    return res.status(500).json({ success: false, error: error?.message || "Không thể làm sạch watermark." });
+  }
+});
+
 // Check file exists
 app.post("/api/project-output-summary", (req, res) => {
   try {
@@ -7274,7 +7409,7 @@ app.post("/api/list-project-media", (req, res) => {
     // timestamps so the UI can reliably select the latest thumbnail rather
     // than guessing from its filename.
     const details = fs.readdirSync(resolvedDirectory)
-      .filter((file) => /\.(?:jpe?g|png|webp|mp4)$/i.test(file))
+      .filter(isUsableGeneratedMediaFile)
       .map((name) => {
         const stat = fs.statSync(path.join(resolvedDirectory, name));
         return { name, mtimeMs: stat.mtimeMs };

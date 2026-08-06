@@ -95,6 +95,8 @@ type AutoConfig = {
   noText: boolean;
   noBlackBorder: boolean;
   noWallPicture: boolean;
+  removeAiWatermark: boolean;
+  watermarkBackend: "cv2" | "migan";
   voiceProvider: string;
   voiceModel: string;
   voiceId: string;
@@ -172,6 +174,8 @@ const DEFAULT_CONFIG: AutoConfig = {
   noText: true,
   noBlackBorder: true,
   noWallPicture: true,
+  removeAiWatermark: false,
+  watermarkBackend: "migan",
   voiceProvider: "premium",
   voiceModel: "Zephyr",
   voiceId: "",
@@ -798,6 +802,8 @@ export default function AutomationControlCenter(props: Props) {
       noText: config.noText,
       noBlackBorder: config.noBlackBorder,
       noWallPicture: config.noWallPicture,
+      removeAiWatermark: config.removeAiWatermark,
+      watermarkBackend: config.watermarkBackend,
       dialogueVideoMode: config.dialogueVideoMode,
       keepVideoAudio: config.keepVideoAudio,
       characterBible: config.characterBible,
@@ -3700,6 +3706,22 @@ export default function AutomationControlCenter(props: Props) {
                 onChange={(value) => update("noWallPicture", value)}
                 label="Không lỗi ảnh tường"
               />
+              <Toggle
+                checked={config.removeAiWatermark}
+                onChange={(value) => update("removeAiWatermark", value)}
+                label="Làm sạch watermark AI"
+              />
+              {config.removeAiWatermark && (
+                <Field label="Chất lượng xóa watermark">
+                  <Select
+                    value={config.watermarkBackend}
+                    onChange={(event) => update("watermarkBackend", event.target.value as "cv2" | "migan")}
+                  >
+                    <option value="migan">Đẹp hơn — MI-GAN</option>
+                    <option value="cv2">Nhanh — OpenCV</option>
+                  </Select>
+                </Field>
+              )}
             </div>
             <section className="relative overflow-hidden rounded-2xl border-2 border-violet-400 bg-gradient-to-r from-violet-100 via-fuchsia-50 to-amber-50 p-4 shadow-lg shadow-violet-100 ring-1 ring-violet-200">
                 <div className="absolute right-0 top-0 rounded-bl-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white">

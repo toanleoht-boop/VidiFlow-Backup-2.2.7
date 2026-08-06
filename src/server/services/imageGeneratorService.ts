@@ -2863,7 +2863,13 @@ async function generateImageWithViettheoAPIOnce(options: ImageGeneratorOptions):
       : "REFERENCE LOCK (MANDATORY): Use every supplied reference image as an exact visual and character source. Preserve identity, face, age, body proportions, hairstyle, wardrobe, colors and visual style. Do not redesign, merge, swap or replace any referenced subject.")
     : "";
   const payload: any = {
-    prompt: [referenceLockInstruction, style, prompt].filter(Boolean).join("\n\n"),
+    // Pipeline prompts already contain one deliberately ordered style block.
+    // Do not prepend the same style again and push concrete scene content down.
+    prompt: [
+      referenceLockInstruction,
+      /VIDIFLOW_SCENE_PRIORITY_V2/i.test(String(prompt || "")) ? "" : style,
+      prompt,
+    ].filter(Boolean).join("\n\n"),
     config: {
       aspectRatio: visualConfig?.aspectRatio || '16:9',
     }

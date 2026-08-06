@@ -2342,22 +2342,62 @@ export default function App() {
         // caption even when the same request also contains "no text".
         if (rawSpokenText) visualOnlyPrompt = visualOnlyPrompt.split(rawSpokenText).join(" ");
         visualOnlyPrompt = visualOnlyPrompt.replace(/\s+/g, " ").replace(/^\s*[.:;,-]+\s*/, "").trim();
-        const cleanedPrompt = illustratedStyle
+        const allowInfographicText = !isVideoOutput && visualConfig.noText === false;
+        let cleanedPrompt = illustratedStyle
           ? visualOnlyPrompt.replace(/\b(photorealistic|photo[- ]realistic|realistic photograph|live[- ]action|cinematic realism|hyperrealistic)\b/gi, "")
           : visualOnlyPrompt;
+        if (allowInfographicText) {
+          // Saved storyboard prompts may still contain the old global ban.
+          // Remove only typography prohibitions; logo/watermark restrictions
+          // remain intact.
+          cleanedPrompt = cleanedPrompt
+            .replace(/\b(?:no|zero)\s+(?:visible\s+)?(?:text|typography|letters?|words?|numbers?|glyphs?|captions?|subtitles?|title cards?|speech bubbles?)\b/gi, " ")
+            .replace(/\bdo not (?:render|show|display) (?:the )?(?:narration|text|captions?|subtitles?|typography)[^.;]*/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        }
         const styleGuard = illustratedStyle
           ? "This is an illustrated artwork, never a photograph, never live action, never photorealistic."
           : "Use the selected visual medium consistently.";
-        const noTypography = !isVideoOutput
-          ? "ABSOLUTE TYPOGRAPHY BAN: create a purely visual scene with zero visible glyphs. Do not render narration, quotations, labels, signs, handwriting, numbers, letters, captions, title cards or speech bubbles anywhere in the image. Every sign-like, paper or display surface must be blank and unreadable."
-          : "Do not display the dialogue as captions, subtitles, signs or on-screen text.";
+        const textLanguage = /[ăâđêôơưáàảãạéèẻẽẹíìỉĩịóòỏõọúùủũụýỳỷỹỵ]/i.test(rawSpokenText)
+          ? "Vietnamese"
+          : "the narration language";
+        const noTypography = allowInfographicText
+          ? `INFOGRAPHIC TEXT POLICY: On-image text is optional and must only clarify the visual meaning. Use at most 1–3 concise labels, a short descriptive phrase, a percentage, ratio, formula or key number when the narration genuinely benefits from it. Write in ${textLanguage}. Summarize the idea; never copy the full narration, never create subtitles, paragraphs, dialogue captions or title-card prose. Keep typography clean, large, readable and integrated with the diagram. Do not invent facts or numbers absent from the narration.`
+          : !isVideoOutput
+            ? "ABSOLUTE TYPOGRAPHY BAN: create a purely visual scene with zero visible glyphs. Do not render narration, quotations, labels, signs, handwriting, numbers, letters, captions, title cards or speech bubbles anywhere in the image. Every sign-like, paper or display surface must be blank and unreadable."
+            : "Do not display the dialogue as captions, subtitles, signs or on-screen text.";
         const identityLock = filterCharacterLockForScene(
           String(
             visualConfig.characterBible || effectiveCharacterLock || "",
           ).trim(),
           `${scenePrompt}\n${spokenText}\n${characterEvidence}`,
         );
-        return `STRICT STYLE CONTRACT — ${imageStyle}. ${styleGuard} Keep exactly this medium, palette, line work and texture in every scene. VISUAL STORY ONLY: communicate the narrative meaning through character action, expression, objects, composition and environment. Do not invent unrelated events, characters or settings. ${noTypography} Scene content: ${cleanedPrompt}. STYLE MUST REMAIN: ${imageStyle}. --ar ${targetAspectRatio}${identityLock ? `\n\n${identityLock}` : ""}`;
+        // Content must lead the request. Previously the same long style block
+        // appeared before, inside and after the scene plan, so image models
+        // often produced a generic on-theme illustration instead of the exact
+        // subjects and action from the narration.
+        const escapedStyle = String(imageStyle || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const sceneVisualPlan = cleanedPrompt
+          .replace(escapedStyle ? new RegExp(escapedStyle, "gi") : /$^/, " ")
+          .replace(/MANDATORY (?:SCENE CONTENT|NARRATIVE BEAT TO VISUALIZE):[\s\S]*?(?=(?:Depict|Visually communicate))/gi, " ")
+          .replace(/(?:Depict the concrete subjects|Visually communicate this exact narrative meaning)[\s\S]*?(?=--ar|$)/gi, " ")
+          .replace(/--ar\s*(?:16:9|9:16|1:1)/gi, " ")
+          .replace(/\s+/g, " ")
+          .replace(/^\s*[.:;,-]+\s*/, "")
+          .trim();
+        const narrativePriority = rawSpokenText || "Use the exact subjects and action specified in the scene visual plan.";
+        return [
+          "VIDIFLOW_SCENE_PRIORITY_V2",
+          `PRIMARY NARRATIVE MEANING — HIGHEST PRIORITY: ${narrativePriority}`,
+          "CONTENT RULE: Show the concrete subjects, action, objects and setting required by the primary narrative. Every named subject must be visibly present and performing the stated action. If any later instruction conflicts with this narrative, ignore the conflicting instruction.",
+          "TOPIC-SYMBOL BAN: Do not add a brain, neural network, science icon, glowing orb, infographic symbol, generic presenter or other topic-themed metaphor unless the primary narrative or scene visual plan explicitly requires it.",
+          `SCENE VISUAL PLAN: ${sceneVisualPlan || narrativePriority}`,
+          `${noTypography}`,
+          `VISUAL STYLE — PRESENTATION ONLY, NEVER CONTENT: ${imageStyle}. ${styleGuard} Apply only the medium, palette, line work and texture after satisfying the scene content.`,
+          `ASPECT RATIO: ${targetAspectRatio}`,
+          identityLock,
+        ].filter(Boolean).join("\n\n");
       };
       const cleanDialogueForVideo = (value: unknown) =>
         String(value || "")
@@ -2401,6 +2441,42 @@ export default function App() {
       };
       const mediaFolder = projectDir + (isVideoOutput ? "\\vid" : "\\img");
       const mediaExt = isVideoOutput ? ".mp4" : ".jpg";
+      const cleanSavedMedia = async (localPath: string) => {
+        if (visualConfig.removeAiWatermark !== true) return;
+        addLog(`Đang làm sạch watermark AI: ${localPath.split(/[\\/]/).pop() || "media"}...`);
+        const response = await fetch("/api/clean-ai-watermark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            path: localPath,
+            mediaType: isVideoOutput ? "video" : "image",
+            backend: visualConfig.watermarkBackend === "cv2" ? "cv2" : "migan",
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result?.success) {
+          const message = result?.error || "lỗi không xác định";
+          addLog(`✕ Dừng preview cảnh này: chưa xóa được watermark (${message}).`);
+          throw new Error(`WATERMARK_CLEANUP_FAILED:${message}`);
+        }
+        addLog(result.cleaned
+          ? `✓ Đã làm sạch watermark; giữ bản gốc tại ${result.backupPath}`
+          : "✓ Không phát hiện watermark cần xóa.");
+      };
+      const cleanExistingMediaBeforePreview = async () => {
+        if (visualConfig.removeAiWatermark !== true) return;
+        const response = await fetch("/api/list-project-media", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+          body: JSON.stringify({ directory: mediaFolder }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result?.success) throw new Error("WATERMARK_CLEANUP_FAILED:Không thể kiểm tra media cũ trước khi preview.");
+        const files: string[] = Array.isArray(result.files) ? result.files : [];
+        if (!files.length) return;
+        addLog(`Đang kiểm tra/xóa watermark cho ${files.length} media đã có trước khi preview...`);
+        for (const file of files) await cleanSavedMedia(`${mediaFolder}\\${file}`);
+      };
       const allPrompts = activeStoryboard.scenes.flatMap((scene: any) => (scene.imagePrompts || []).map((prompt: any, promptIndex: number) => ({ scene, prompt, promptIndex })));
       setPipelineExpectedPromptCount(allPrompts.length);
       if (!allPrompts.length) throw new Error("Các phân cảnh chưa có prompt tạo media.");
@@ -2467,6 +2543,7 @@ export default function App() {
           const saved = await fetch("/api/download-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result.base64 ? { path, audioData: result.base64 } : { path, url: sourceUrl }) });
           const savedData = await saved.json().catch(() => ({}));
           if (!saved.ok || !savedData?.success) throw new Error(`Không thể lưu ảnh khóa ${item.previewKey}.`);
+          await cleanSavedMedia(path);
           lockedKeyframeByPrompt[item.previewKey] = `/api/serve-local-file?path=${encodeURIComponent(path)}&t=${Date.now()}`;
           addLog(`✓ Ảnh khóa ${Object.keys(lockedKeyframeByPrompt).length}/${allPrompts.length}: ${item.previewKey}`);
         };
@@ -2507,6 +2584,7 @@ export default function App() {
       // P11.1 becomes p11_1. Removing every dot as if it were an extension
       // made P11.1 collide with the filename for P1.1.
       if (!lockedKeyframesPipeline) try {
+        await cleanExistingMediaBeforePreview();
         const listedResponse = await fetch("/api/list-project-media", {
           method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
           body: JSON.stringify({ directory: mediaFolder }),
@@ -2545,8 +2623,11 @@ export default function App() {
         if (restored) {
           addLog(`Bo qua ${restored}/${allPrompts.length} ${isVideoOutput ? "video" : "anh"} da co trong thu muc du an.`);
         }
-      } catch {
-        // A failed disk scan must not block a new project from generating.
+      } catch (error: any) {
+        // Watermark cleanup is an explicit gate: no old file may be previewed
+        // or reused when the user has requested cleanup and it did not finish.
+        if (String(error?.message || "").startsWith("WATERMARK_CLEANUP_FAILED:")) throw error;
+        // A normal disk scan failure must not block a brand-new project.
       } else {
         setGeneratedImages(previous => {
           const next = { ...previous };
@@ -2654,6 +2735,7 @@ export default function App() {
         if (!saved.ok || !savedData?.success) {
           throw new Error(savedData?.error || `Không thể lưu ảnh thay thế cho ${mediaId}.`);
         }
+        await cleanSavedMedia(fallbackImagePath);
         const previewUrl = `/api/serve-local-file?path=${encodeURIComponent(fallbackImagePath)}&t=${Date.now()}`;
         generatedMedia[mediaId] = previewUrl;
         setGeneratedImages(previous => ({ ...previous, [mediaId]: previewUrl }));
@@ -2752,6 +2834,8 @@ export default function App() {
               const localPath = `${mediaFolder}\\scene-${previewKey.replace(/[^a-z0-9_-]/gi, "_")}${mediaExt}`;
               const saved = await fetch("/api/download-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result.base64 ? { path: localPath, audioData: result.base64 } : { path: localPath, url: mediaUrl }) });
               const savedData = await saved.json().catch(() => ({}));
+              if (!saved.ok || !savedData?.success) throw new Error(savedData?.error || "Không thể lưu media trước khi xoá watermark.");
+        await cleanSavedMedia(localPath);
               // Do not replace a valid provider preview with a local URL until
               // the file is actually saved. This keeps preview/retry usable on
               // network errors and on project folders with Vietnamese names.
@@ -2825,6 +2909,8 @@ export default function App() {
         const localPath = `${mediaFolder}\\${String(index + 1).padStart(3, "0")}_${mediaId.replace(/[^a-z0-9_-]/gi, "_")}${mediaExt}`;
         const saved = await fetch("/api/download-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(result.base64 ? { path: localPath, audioData: result.base64 } : { path: localPath, url: mediaUrl }) });
         const savedData = await saved.json().catch(() => ({}));
+        if (!saved.ok || !savedData?.success) throw new Error(savedData?.error || "Không thể lưu media trước khi xoá watermark.");
+        await cleanSavedMedia(localPath);
         const previewUrl = saved.ok && savedData?.success
           ? `/api/serve-local-file?path=${encodeURIComponent(localPath)}&t=${Date.now()}`
           : mediaUrl;
@@ -3007,7 +3093,11 @@ export default function App() {
           titleOptions: [`${keyword} | Câu chuyện đáng suy ngẫm`],
           seoDescription: `${summary}\n\nĐăng ký kênh để theo dõi các nội dung tiếp theo.\n#${keyword.replace(/\s+/g, "")} #vidiflow`,
           tags: { primaryKeyword: keyword, secondaryKeyword: "câu chuyện", channelTag: channelName || "VidiFlow", competitorTags: [] },
-          thumbnailConcept: { visualIdea: "", thumbnailText: "", imagePrompt: "" },
+          thumbnailConcept: {
+            visualIdea: `Một chủ thể nổi bật minh họa trực tiếp cho ${keyword}, bố cục thumbnail rõ ràng và tương phản cao.`,
+            thumbnailText: thumbHasText ? (thumbCustomText.trim() || keyword).split(/\s+/).slice(0, 5).join(" ") : "",
+            imagePrompt: `High-impact YouTube thumbnail about ${keyword}. Show one concrete focal subject and action directly supported by this script summary: ${summary}. Strong visual hierarchy, clean uncluttered composition, high contrast, expressive focal point, no unrelated symbols or generic presenter.`,
+          },
           seedingComments: [],
           isProgrammaticFallback: true,
         };
@@ -3018,34 +3108,56 @@ export default function App() {
       setSeoData(completedSeo);
       pipelineRecoveryStage = 4;
       await fetch("/api/save-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: projectDir + "\\seo.txt", content: `TIÊU ĐỀ\n${completedSeo.seoTitle || ""}\n\nMÔ TẢ\n${completedSeo.seoDescription || ""}\n\nPROMPT THUMBNAIL\n${completedSeo.thumbnailConcept?.imagePrompt || ""}` }) });
-      const thumbnailPrompt = String(completedSeo.thumbnailConcept?.imagePrompt || "").trim();
-      const thumbnailCharacterLock = ` CHARACTER IDENTITY LOCK: ${effectiveCharacterLock}. Keep the same gender, age range, face, body proportions, hairstyle, skin tone and wardrobe as the video scenes; never gender-swap, age-shift or redesign the recurring character.`;
-      if (thumbnailPrompt) {
-        addLog("▶ Đang tạo ảnh thumbnail từ prompt SEO...");
-        const thumbnailText = String(completedSeo.thumbnailConcept?.thumbnailText || completedSeo.seoTitle || "").trim().split(/\s+/).slice(0, 5).join(" ");
-        const thumbnailOverlay = thumbHasText ? `. Include a short, bold, readable title text: \"${thumbCustomText.trim() || thumbnailText}\".` : ". Do not include any text, letters, captions, logos, or typography.";
-        const requiredThumbnailText = thumbCustomText.trim() || thumbnailText;
-        const thumbnailResponse = await fetch("/api/pipeline/generate-image", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ prompt: `${thumbnailPrompt}${thumbnailCharacterLock}${thumbnailOverlay} --ar ${targetAspectRatio}`, style: imageStyle, bypassCache: true, visualConfig: { ...visualConfig, generateType: "image", aspectRatio: targetAspectRatio, noText: false, thumbnailTextRequired: thumbHasText, thumbnailText: requiredThumbnailText, characterBible: effectiveCharacterLock } }) });
-        const thumbnail = await thumbnailResponse.json();
-        if (thumbnail.success && (thumbnail.base64 || thumbnail.fallbackUrl)) {
-          const thumbnailPath = projectDir + "\\thumbnail_" + new Date().toISOString().slice(0, 10) + ".jpg";
-          await fetch("/api/download-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(thumbnail.base64 ? { path: thumbnailPath, audioData: thumbnail.base64 } : { path: thumbnailPath, url: thumbnail.fallbackUrl }) });
-          if (thumbHasText && requiredThumbnailText) {
-            const overlay = await fetch("/api/add-thumbnail-text", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ inputPath: thumbnailPath, outputPath: thumbnailPath, text: requiredThumbnailText }),
-            });
-            if (!overlay.ok) {
-              const detail = await overlay.json().catch(() => ({}));
-              addLog("⚠ Ảnh thumbnail đã tạo nhưng chưa chèn được chữ: " + (detail.error || "lỗi không xác định"));
-            }
-          }
-          addLog("✓ Đã lưu ảnh thumbnail vào thư mục gốc.");
-        } else {
-          addLog("⚠ Không tạo được thumbnail; video vẫn tiếp tục render.");
+      const fallbackThumbnailPrompt = `High-impact YouTube thumbnail illustrating the central idea of this script: ${finalScript.replace(/\s+/g, " ").trim().slice(0, 500)}. Show one concrete focal subject and action, clean uncluttered composition, strong contrast, no unrelated symbols or generic presenter.`;
+      const thumbnailPrompt = String(completedSeo.thumbnailConcept?.imagePrompt || fallbackThumbnailPrompt).trim();
+      if (!completedSeo.thumbnailConcept) completedSeo.thumbnailConcept = { visualIdea: "", thumbnailText: "", imagePrompt: thumbnailPrompt };
+      else if (!String(completedSeo.thumbnailConcept.imagePrompt || "").trim()) completedSeo.thumbnailConcept.imagePrompt = thumbnailPrompt;
+      setSeoData({ ...completedSeo });
+      const thumbnailCharacterLock = effectiveCharacterLock
+        ? ` CHARACTER IDENTITY LOCK: ${effectiveCharacterLock}. Keep the same gender, age range, face, body proportions, hairstyle, skin tone and wardrobe as the video scenes; never gender-swap, age-shift or redesign the recurring character.`
+        : "";
+      addLog("▶ Đang tạo ảnh thumbnail từ prompt SEO...");
+      const thumbnailText = String(completedSeo.thumbnailConcept?.thumbnailText || completedSeo.seoTitle || "").trim().split(/\s+/).slice(0, 5).join(" ");
+      const thumbnailOverlay = thumbHasText ? `. MANDATORY IN-IMAGE TYPOGRAPHY: Render this exact Vietnamese title as visible typography inside the generated thumbnail: "${thumbCustomText.trim() || thumbnailText}". Place it prominently, large, bold, high-contrast, fully legible, with clean spelling. This text must be part of the generated image itself; do not leave the image text-free.` : ". Do not include any text, letters, captions, logos, or typography.";
+      const requiredThumbnailText = thumbCustomText.trim() || thumbnailText;
+      let thumbnail: any = null;
+      let thumbnailError = "";
+      for (let thumbnailAttempt = 1; thumbnailAttempt <= 3; thumbnailAttempt += 1) {
+        const thumbnailResponse = await fetch("/api/pipeline/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            prompt: `${thumbnailPrompt}${thumbnailCharacterLock}${thumbnailOverlay} --ar ${targetAspectRatio}`,
+            style: imageStyle,
+            bypassCache: true,
+            visualConfig: { ...visualConfig, generateType: "image", aspectRatio: targetAspectRatio, noText: false, thumbnailTextRequired: thumbHasText, thumbnailText: requiredThumbnailText, characterBible: effectiveCharacterLock },
+          }),
+        });
+        thumbnail = await thumbnailResponse.json().catch(() => ({}));
+        if (thumbnailResponse.ok && thumbnail?.success && (thumbnail.base64 || thumbnail.fallbackUrl)) break;
+        thumbnailError = thumbnail?.error || thumbnail?.warning || `HTTP ${thumbnailResponse.status}`;
+        thumbnail = null;
+        if (thumbnailAttempt < 3) {
+          addLog(`⚠ Thumbnail lần ${thumbnailAttempt}/3 chưa thành công (${thumbnailError}). Đang thử lại...`);
+          await new Promise(resolve => setTimeout(resolve, thumbnailAttempt * 2500));
         }
       }
+      if (!thumbnail) throw new Error(`Không thể tạo thumbnail sau 3 lần thử: ${thumbnailError || "nhà cung cấp không trả ảnh"}`);
+      const thumbnailPath = projectDir + "\\thumbnail_latest.jpg";
+      const thumbnailSaveResponse = await fetch("/api/download-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(thumbnail.base64 ? { path: thumbnailPath, audioData: thumbnail.base64 } : { path: thumbnailPath, url: thumbnail.fallbackUrl }),
+      });
+      const thumbnailSaveResult = await thumbnailSaveResponse.json().catch(() => ({}));
+      if (!thumbnailSaveResponse.ok || thumbnailSaveResult?.success === false) {
+        throw new Error(thumbnailSaveResult?.error || "Thumbnail đã tạo nhưng không thể lưu vào thư mục dự án.");
+      }
+      // Text is generated natively by the image model; no FFmpeg overlay is used.
+      setThumbnailPreviewUrl(`/api/serve-local-file?path=${encodeURIComponent(thumbnailPath)}&t=${Date.now()}`);
+      setThumbnailRevision(previous => previous + 1);
+      addLog("✓ Đã tạo, kiểm tra và lưu thumbnail_latest.jpg vào thư mục dự án.");
       addLog("✓ Đã tạo SEO và tên video xuất.");
       if (twoStage && manualStage === 3) {
         setManualWorkflowStage(4);
@@ -4131,6 +4243,23 @@ export default function App() {
         body: JSON.stringify(result.base64 ? { path: localPath, audioData: result.base64 } : { path: localPath, url: mediaUrl }),
       });
       const savedData = await saved.json().catch(() => ({}));
+      if (saved.ok && savedData?.success && visualConfig.removeAiWatermark === true) {
+        const cleanResponse = await fetch("/api/clean-ai-watermark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path: localPath,
+            mediaType: isVideo ? "video" : "image",
+            backend: visualConfig.watermarkBackend === "cv2" ? "cv2" : "migan",
+          }),
+        });
+        const cleanResult = await cleanResponse.json().catch(() => ({}));
+        setAutoPipelineLogs(previous => [...previous,
+          cleanResponse.ok && cleanResult?.success
+            ? (cleanResult.cleaned ? `✓ Đã xóa watermark cho ${mediaKey}.` : `✓ ${mediaKey} không có watermark nhận diện được.`)
+            : `⚠️ Chưa xóa được watermark ${mediaKey}: ${cleanResult?.error || "lỗi không xác định"}`,
+        ]);
+      }
       // A generated provider URL/base64 is still a valid result. Keep it on
       // screen if the optional project save fails so the retry action remains
       // available instead of turning the preview into a broken local URL.
@@ -4482,11 +4611,10 @@ export default function App() {
   };
 
   const handleRegenerateThumbnail = async () => {
-    const thumbnailPrompt = String(seoData?.thumbnailConcept?.imagePrompt || "").trim();
-    if (!thumbnailPrompt) {
-      alert("Chưa có prompt thumbnail. Hãy tạo SEO trước rồi thử lại.");
-      return;
-    }
+    const thumbnailPrompt = String(
+      seoData?.thumbnailConcept?.imagePrompt ||
+      `High-impact YouTube thumbnail illustrating this video: ${(standardizedScript || rawTranscript).replace(/\s+/g, " ").trim().slice(0, 500)}. Show one concrete focal subject and action, clean composition and strong contrast.`,
+    ).trim();
     if (!projectDir.trim()) {
       alert("Hãy chọn thư mục dự án trước khi tạo lại thumbnail.");
       return;
@@ -4511,7 +4639,7 @@ export default function App() {
       ).trim().split(/\s+/).slice(0, 5).join(" ");
       const requiredThumbnailText = thumbCustomText.trim() || thumbnailText;
       const thumbnailOverlay = thumbHasText
-        ? `. Include a short, bold, readable title text: \"${requiredThumbnailText}\".`
+        ? `. MANDATORY IN-IMAGE TYPOGRAPHY: Render this exact Vietnamese title as visible typography inside the generated thumbnail: "${requiredThumbnailText}". Place it prominently, large, bold, high-contrast, fully legible, with clean spelling. This text must be part of the generated image itself; do not leave the image text-free.`
         : ". Do not include any text, letters, captions, logos, or typography.";
       const thumbnailCharacterLock = characterDescription.trim()
         ? ` CHARACTER IDENTITY LOCK: ${characterDescription.trim()}. Keep the same gender, age range, face, body proportions, hairstyle, skin tone and wardrobe as the video scenes; never gender-swap, age-shift or redesign the recurring character.`
@@ -4556,22 +4684,7 @@ export default function App() {
       if (!saveResponse.ok || saveResult?.success === false) {
         throw new Error(saveResult?.error || "Không thể lưu ảnh thumbnail vào dự án.");
       }
-
-      if (thumbHasText && requiredThumbnailText) {
-        const overlayResponse = await fetch("/api/add-thumbnail-text", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inputPath: thumbnailPath,
-            outputPath: thumbnailPath,
-            text: requiredThumbnailText,
-          }),
-        });
-        const overlayResult = await overlayResponse.json().catch(() => ({}));
-        if (!overlayResponse.ok || overlayResult?.success === false) {
-          setAutoPipelineLogs((previous) => [...previous, "⚠ Thumbnail đã tạo nhưng chưa chèn được chữ: " + (overlayResult?.error || "lỗi không xác định")]);
-        }
-      }
+      // Text is generated natively by the image model; no FFmpeg overlay is used.
 
       setThumbnailPreviewUrl(
         `/api/serve-local-file?path=${encodeURIComponent(thumbnailPath)}&t=${Date.now()}`,
