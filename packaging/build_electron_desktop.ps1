@@ -104,6 +104,7 @@ Copy-Item "$root\public\brand" "$stage\brand" -Recurse -Force
     throw 'Portable python.exe is missing in windows_runtime\python.'
   }
   Copy-Item -LiteralPath $pythonRuntime -Destination "$stage\runtime\python" -Recurse -Force
+  Copy-Item (Get-Command uv -ErrorAction Stop).Source "$stage\runtime\uv.exe" -Force
   # Never distribute browser runtimes, profiles, cookies, or signed-in Google
   # sessions. Playwright connects to the customer's locally installed Chrome.
   # Customer Chrome profiles are discovered locally at runtime from their own

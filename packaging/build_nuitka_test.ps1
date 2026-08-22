@@ -14,6 +14,7 @@ try {
   Copy-Item (Join-Path $root 'dist') (Join-Path $stage 'dist') -Recurse -Force; Copy-Item (Join-Path $root 'public') (Join-Path $stage 'public') -Recurse -Force
   Copy-Item $nodeModulesSource (Join-Path $stage 'node_modules') -Recurse -Force; Copy-Item (Join-Path $root 'python_scripts') (Join-Path $stage 'python_scripts') -Recurse -Force
   New-Item -ItemType Directory -Path (Join-Path $stage 'runtime') -Force | Out-Null; Copy-Item $nodeHome (Join-Path $stage 'runtime\node') -Recurse -Force
+  Copy-Item (Get-Command uv -ErrorAction Stop).Source (Join-Path $stage 'runtime\uv.exe') -Force
   if (-not $SkipBrowserRuntime) { Copy-Item $browserHome (Join-Path $stage 'runtime\playwright-browsers') -Recurse -Force }
   "Extract the entire folder, then open vidiflow_launcher.dist\VidiFlow OneClick.exe. The test package does not contain API keys." | Set-Content (Join-Path $out 'README-TEST.txt') -Encoding utf8
   Write-Host "Test package created: $out"

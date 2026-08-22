@@ -320,6 +320,8 @@ export default function AudioTimelinePro({ projectDir, storyboardData, seoTitle,
     clearGlobalLogs();
     
     try {
+      let overviewZoomEnabled = false;
+      try { overviewZoomEnabled = JSON.parse(localStorage.getItem("automation_full_config_v1") || "{}").overviewZoomEnabled === true; } catch {}
       const response = await fetch("/api/render-ffmpeg", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -344,6 +346,7 @@ export default function AudioTimelinePro({ projectDir, storyboardData, seoTitle,
           watermarkPath,
           watermarkText,
           watermarkPosition,
+          overviewZoomEnabled,
         }),
       });
 

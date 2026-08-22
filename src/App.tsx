@@ -138,6 +138,74 @@ const SUGGESTED_NICHES = [
   }
 ];
 
+type OverviewZoomEntry = { code: string; groupId: string; rows: number; cols: number; focusIndex: number; sourceCode?: string };
+
+type OverviewBoardItem = { sceneNumber: number; label: string };
+type OverviewScriptBoard = { title: string; items: OverviewBoardItem[] };
+
+const planOverviewBoardsFromScript = async (script: string, scenes: any[], enabled: boolean): Promise<OverviewScriptBoard[]> => {
+  if (!enabled || scenes.length < 2) return [];
+  const response = await fetch('/api/plan-overview-zoom', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script, scenes }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.success !== true) {
+    throw new Error(payload?.error || 'Không thể phân tích các mục đánh số theo kịch bản cho ảnh tổng quan.');
+  }
+  return Array.isArray(payload.boards) ? payload.boards : [];
+};
+
+const applyScriptOverviewZoomPlan = (storyboard: any, enabled: boolean, boards: OverviewScriptBoard[], style: string, aspectRatio: string) => {
+  const scenes = Array.isArray(storyboard?.scenes) ? storyboard.scenes : [];
+  const entries: OverviewZoomEntry[] = [];
+  for (const scene of scenes) for (const prompt of Array.isArray(scene?.imagePrompts) ? scene.imagePrompts : []) {
+    if (prompt?.overviewBasePrompt) { prompt.englishPrompt = prompt.overviewBasePrompt; prompt.prompt = prompt.overviewBasePrompt; }
+    delete prompt.overviewZoom;
+  }
+  if (!enabled || !boards.length) {
+    storyboard.overviewZoom = { enabled: false, version: 3, entries: [] };
+    return storyboard.overviewZoom;
+  }
+  boards.forEach((board, boardIndex) => {
+    const items = Array.isArray(board?.items) ? board.items : [];
+    const resolved = items.map((item) => {
+      const scene = scenes.find((candidate: any, index: number) => Number(candidate?.sceneNumber || index + 1) === Number(item.sceneNumber));
+      const prompt = scene?.imagePrompts?.[0];
+      return scene && prompt ? { item, scene, prompt } : null;
+    }).filter(Boolean) as Array<{ item: OverviewBoardItem; scene: any; prompt: any }>;
+    if (resolved.length < 2) return;
+    const count = resolved.length;
+    const cols = String(aspectRatio).includes('9:16') ? 2 : count > 6 ? 4 : count > 3 ? 3 : 2;
+    const rows = Math.ceil(count / cols);
+    const groupId = `G${boardIndex + 1}`;
+    const sourceCode = String(resolved[0].prompt.code || `P${resolved[0].item.sceneNumber}.1`);
+    const cells = resolved.map(({ item, scene, prompt }, index) => {
+      const sceneContent = String(prompt.subText || prompt.subText_vi || scene.text || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+      return `CELL ${index + 1} — ${item.label}: ${sceneContent}`;
+    });
+    const boardPrompt = `${style || 'clean visual storytelling'}. OVERVIEW_ZOOM_BOARD_V3, title: ${board.title}. Create one single unified overview board arranged as an exact ${cols}-column by ${rows}-row grid. The board must contain these spoken numbered items in this exact order: ${cells.join('; ')}. Every cell must clearly visualize its own exact item and narration content, with consistent characters, palette, scale and art direction across the whole board. Use equal cell geometry and clear boundaries. Keep the full board readable before zoom. No invented sections, no generic unrelated icons, no duplicated cells, no extra text unless explicitly requested. --ar ${aspectRatio}`;
+    resolved.forEach(({ item, prompt }, focusIndex) => {
+      const code = String(prompt.code || `P${item.sceneNumber}.1`);
+      const basePrompt = String(prompt.overviewBasePrompt || prompt.englishPrompt || prompt.prompt || '').trim();
+      prompt.overviewBasePrompt = basePrompt;
+      prompt.englishPrompt = boardPrompt;
+      prompt.prompt = boardPrompt;
+      prompt.overviewZoom = { groupId, title: board.title, rows, cols, focusIndex, sourceCode };
+      entries.push({ code, groupId, rows, cols, focusIndex, sourceCode });
+    });
+  });
+  storyboard.overviewZoom = { enabled: entries.length > 0, version: 3, boards, entries };
+  return storyboard.overviewZoom;
+};
+const saveOverviewZoomManifest = async (projectDir: string, manifest: any) => {
+  if (!projectDir) return;
+  const response = await fetch('/api/save-file', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: projectDir + '\\overview_zoom_manifest.json', content: JSON.stringify(manifest, null, 2) }),
+  });
+  if (!response.ok) throw new Error('Không thể lưu cấu hình tổng quan-zoom vào project.');
+};
 export default function App() {
   // Refs cho abort controllers hỗ trợ huỷ bỏ tiến trình
   const brainstormAbortController = useRef<AbortController | null>(null);
@@ -1873,10 +1941,12 @@ export default function App() {
         const requestedRewriteLevel = String(automationConfig.rewriteLevel || "original");
         const rewriteRequestedByConfig = ["keep", "light", "balanced", "strong"].includes(requestedRewriteLevel);
         const shouldRewriteCurrentScript =
+          scriptLang !== "original" ||
           rewriteRequestedByConfig ||
           automationConfig.rewriteLengthMode !== "source" ||
           Boolean(String(automationConfig.scriptInstructions || "").trim());
         preserveOriginalMode =
+          scriptLang === "original" &&
           automationConfig.rewriteLengthMode === "source" &&
           !String(automationConfig.scriptInstructions || "").trim() &&
           automationConfig.inputType !== "idea" &&
@@ -2216,6 +2286,13 @@ export default function App() {
           }));
         }
 
+        const overviewEnabled = pipelineAutomationConfig.overviewZoomEnabled === true;
+        const overviewBoards = await planOverviewBoardsFromScript(finalScript, data.scenes || [], overviewEnabled);
+        const overviewManifest = applyScriptOverviewZoomPlan(data, overviewEnabled, overviewBoards, imageStyle, storyboardAspectRatio);
+        await saveOverviewZoomManifest(projectDir, overviewManifest);
+        if (overviewManifest.enabled) addLog(`✓ Đã tạo bảng tổng quan với ${overviewManifest.entries.length} mốc zoom đúng theo câu thoại đánh số; không tăng prompt/voice.`);
+        else if (overviewEnabled) addLog("ℹ Không thấy chuỗi Phần/Bước/Cấp độ/Kiểu/Loại đánh số rõ ràng; tự bỏ qua ảnh tổng quan.");
+
         autoStoryboard = data;
         setStoryboardData(data);
         setIsStoryboardProgrammatic(!!data.isProgrammaticFallback);
@@ -2478,14 +2555,62 @@ export default function App() {
         for (const file of files) await cleanSavedMedia(`${mediaFolder}\\${file}`);
       };
       const allPrompts = activeStoryboard.scenes.flatMap((scene: any) => (scene.imagePrompts || []).map((prompt: any, promptIndex: number) => ({ scene, prompt, promptIndex })));
+      // An overview board is one shared image. Generate its master once and
+      // alias every numbered item to that same file; focusIndex remains in the
+      // manifest and is applied only during the final render zoom.
+      const normalizeOverviewCode = (value: any) => String(value || '').replace(/[._-]+/g, '_').toUpperCase();
+      const overviewMasterByCode = new Map<string, string>();
+      const overviewAliasesByMaster = new Map<string, string[]>();
+      const overviewEntries = Array.isArray(activeStoryboard?.overviewZoom?.entries) ? activeStoryboard.overviewZoom.entries : [];
+      for (const entry of overviewEntries) {
+        const code = normalizeOverviewCode(entry?.code);
+        const master = normalizeOverviewCode(entry?.sourceCode || entry?.code);
+        if (!code || !master) continue;
+        overviewMasterByCode.set(code, master);
+        const aliases = overviewAliasesByMaster.get(master) || [];
+        aliases.push(String(entry.code));
+        overviewAliasesByMaster.set(master, aliases);
+      }
+      const mediaGenerationPrompts = allPrompts.filter(({ prompt }: any) => {
+        const code = normalizeOverviewCode(prompt.code);
+        const master = overviewMasterByCode.get(code);
+        return !master || master === code;
+      });
+      const generationCount = mediaGenerationPrompts.length;
+      const generatedKeysFor = (key: string) => {
+        const master = overviewMasterByCode.get(normalizeOverviewCode(key));
+        return master ? [master, ...(overviewAliasesByMaster.get(master) || [])] : [key];
+      };
+      const assignGeneratedMedia = (key: string, url: string, generatedMedia: Record<string, string>) => {
+        for (const alias of generatedKeysFor(key)) generatedMedia[alias] = url;
+      };
+      const copyOverviewAliases = async (key: string, sourcePath: string) => {
+        const master = overviewMasterByCode.get(normalizeOverviewCode(key));
+        const aliases = master ? (overviewAliasesByMaster.get(master) || []) : [];
+        const copied = new Set<string>();
+        for (const alias of aliases) {
+          const aliasFile = String(alias).replace(/[^a-z0-9_-]/gi, "_");
+          if (!aliasFile || copied.has(aliasFile) || normalizeOverviewCode(alias) === normalizeOverviewCode(key)) continue;
+          copied.add(aliasFile);
+          const targetPath = mediaFolder + "\\scene-" + aliasFile + mediaExt;
+          await fetch("/api/copy-local-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourcePath, targetPath }),
+          });
+        }
+      };
       setPipelineExpectedPromptCount(allPrompts.length);
+      if (generationCount < allPrompts.length) {
+        addLog(`Ảnh tổng quan: tạo ${generationCount} ảnh master cho ${allPrompts.length} prompt, các mục cùng bảng dùng chung file.`);
+      }
       if (!allPrompts.length) throw new Error("Các phân cảnh chưa có prompt tạo media.");
       const lockedKeyframesPipeline = isVideoOutput && visualConfig.lockedKeyframesPipeline === true;
       const lockedKeyframeByPrompt: Record<string, string> = {};
       if (lockedKeyframesPipeline && (!twoStage || manualStage === 2)) {
         addLog(`▶ Đang tạo ${allPrompts.length} ảnh khóa trước khi tạo video...`);
         const keyframeFolder = `${projectDir}\\keyframes`;
-        const allKeyframeItems = allPrompts.map(({ scene, prompt, promptIndex }: any, index: number) => {
+        const allKeyframeItems = mediaGenerationPrompts.map(({ scene, prompt, promptIndex }: any, index: number) => {
           const previewKey = String(prompt.code || `scene-${scene.sceneNumber || index + 1}-${promptIndex + 1}`);
           const spokenText = cleanDialogueForVideo(prompt.subText_vi || prompt.subText || scene.text_vi || scene.text || "");
           return {
@@ -2509,7 +2634,8 @@ export default function App() {
             const existing = files.find(file => String(file).replace(/\\/g, "/").split("/").pop()?.toLowerCase() === expected);
             if (!existing) continue;
             const path = `${keyframeFolder}\\${String(existing).replace(/\\/g, "/").split("/").pop()}`;
-            lockedKeyframeByPrompt[item.previewKey] = `/api/serve-local-file?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+            const keyframeUrl = `/api/serve-local-file?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+            for (const alias of generatedKeysFor(item.previewKey)) lockedKeyframeByPrompt[alias] = keyframeUrl;
           }
           if (Object.keys(lockedKeyframeByPrompt).length) addLog(`✓ Tiếp tục từ ${Object.keys(lockedKeyframeByPrompt).length}/${allPrompts.length} ảnh khóa đã lưu.`);
         } catch {}
@@ -2544,7 +2670,8 @@ export default function App() {
           const savedData = await saved.json().catch(() => ({}));
           if (!saved.ok || !savedData?.success) throw new Error(`Không thể lưu ảnh khóa ${item.previewKey}.`);
           await cleanSavedMedia(path);
-          lockedKeyframeByPrompt[item.previewKey] = `/api/serve-local-file?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+          const keyframeUrl = `/api/serve-local-file?path=${encodeURIComponent(path)}&t=${Date.now()}`;
+          for (const alias of generatedKeysFor(item.previewKey)) lockedKeyframeByPrompt[alias] = keyframeUrl;
           addLog(`✓ Ảnh khóa ${Object.keys(lockedKeyframeByPrompt).length}/${allPrompts.length}: ${item.previewKey}`);
         };
         while (true) {
@@ -2601,12 +2728,13 @@ export default function App() {
         let restored = 0;
         for (const { scene, prompt, promptIndex } of allPrompts) {
           const previewKey = String(prompt.code || `scene-${scene.sceneNumber || 1}-${promptIndex + 1}`);
-          const wanted = normalizeSceneFile(previewKey);
+          const masterKey = overviewMasterByCode.get(normalizeOverviewCode(previewKey)) || previewKey;
+          const wanted = normalizeSceneFile(masterKey);
           const existing = files.find(file => normalizeSceneFile(file) === wanted);
           if (!existing) continue;
           const localPath = `${mediaFolder}\\${existing}`;
           const localUrl = `/api/serve-local-file?path=${encodeURIComponent(localPath)}&t=${Date.now()}`;
-          generatedMedia[previewKey] = localUrl;
+          assignGeneratedMedia(previewKey, localUrl, generatedMedia);
           restored += 1;
         }
         // Remove stale browser/localStorage previews for the current prompt
@@ -2737,13 +2865,13 @@ export default function App() {
         }
         await cleanSavedMedia(fallbackImagePath);
         const previewUrl = `/api/serve-local-file?path=${encodeURIComponent(fallbackImagePath)}&t=${Date.now()}`;
-        generatedMedia[mediaId] = previewUrl;
-        setGeneratedImages(previous => ({ ...previous, [mediaId]: previewUrl }));
+        assignGeneratedMedia(mediaId, previewUrl, generatedMedia);
+        setGeneratedImages(previous => ({ ...previous, ...Object.fromEntries(generatedKeysFor(mediaId).map(key => [key, previewUrl])) }));
         addLog(`✓ ${mediaId}: đã dùng ảnh thay thế đúng vị trí video lỗi; thời lượng sẽ lấy theo đoạn kịch bản/voice khi render.`);
       };
       let batchCompleted = false;
       try {
-        const batchItems = allPrompts.map(({ scene, prompt, promptIndex }: any, index: number) => ({
+        const batchItems = mediaGenerationPrompts.map(({ scene, prompt, promptIndex }: any, index: number) => ({
           sceneId: `auto-${String(index + 1).padStart(3, "0")}-${String(prompt.code || `scene-${scene.sceneNumber || index + 1}-${promptIndex + 1}`).replace(/[^a-z0-9_-]/gi, "_")}`,
           // Keep the UI key identical to the storyboard prompt code. sceneId
           // is only for the batch scheduler and must be unique across workers.
@@ -2775,7 +2903,7 @@ export default function App() {
         // budget. Only exhausted balance/quota or explicit cancellation is
         // terminal. In particular, "job data expired on Redis" is an
         // infrastructure timeout, not a rejected prompt/content-policy error.
-        const isTerminalMediaFailure = (message: string) => /(hết\s*credit|insufficient\s*(credit|balance)|quota\s*(exceeded|exhausted)|người\s*dùng\s*(huỷ|hủy)|user\s*cancel(?:led|ed)?)/i.test(String(message || ""));
+        const isTerminalMediaFailure = (message: string) => /(hết\s*credit|insufficient\s*(credit|balance)|quota\s*(exceeded|exhausted)|content\s*policy|policy\s*violation|refused\s+to\s+create|violat(?:es?|ion)|người\s*dùng\s*(huỷ|hủy)|user\s*cancel(?:led|ed)?)/i.test(String(message || ""));
         if (pendingBatchItems.length === 0) {
           batchCompleted = true;
           addLog(`Tat ca ${allPrompts.length} ${isVideoOutput ? "video" : "anh"} da ton tai, khong tao lai.`);
@@ -2842,8 +2970,8 @@ export default function App() {
               const previewUrl = saved.ok && savedData?.success
                 ? `/api/serve-local-file?path=${encodeURIComponent(localPath)}&t=${Date.now()}`
                 : mediaUrl;
-              generatedMedia[previewKey] = previewUrl;
-              setGeneratedImages(previous => ({ ...previous, [previewKey]: previewUrl }));
+              assignGeneratedMedia(previewKey, previewUrl, generatedMedia);
+              setGeneratedImages(previous => ({ ...previous, ...Object.fromEntries(generatedKeysFor(previewKey).map(key => [key, previewUrl])) }));
               completed += 1;
               setAutoPipelineProgress(74 + Math.round((completed / allPrompts.length) * 10));
               addLog(`Media ${completed}/${allPrompts.length} da tao va hien thi preview.`);
@@ -2883,7 +3011,7 @@ export default function App() {
           await createFallbackImage(mediaId, profile, reason);
         }
       }
-      const missingMediaTasks = allPrompts.filter(({ scene, prompt, promptIndex }: any, index: number) => {
+      const missingMediaTasks = mediaGenerationPrompts.filter(({ scene, prompt, promptIndex }: any, index: number) => {
         const mediaId = String(prompt.code || `scene-${scene.sceneNumber || index + 1}-${promptIndex + 1}`);
         return !generatedMedia[mediaId];
       });
@@ -2911,11 +3039,12 @@ export default function App() {
         const savedData = await saved.json().catch(() => ({}));
         if (!saved.ok || !savedData?.success) throw new Error(savedData?.error || "Không thể lưu media trước khi xoá watermark.");
         await cleanSavedMedia(localPath);
+        await copyOverviewAliases(mediaId, localPath);
         const previewUrl = saved.ok && savedData?.success
           ? `/api/serve-local-file?path=${encodeURIComponent(localPath)}&t=${Date.now()}`
           : mediaUrl;
-        generatedMedia[mediaId] = previewUrl;
-        setGeneratedImages(previous => ({ ...previous, [mediaId]: previewUrl }));
+        assignGeneratedMedia(mediaId, previewUrl, generatedMedia);
+        setGeneratedImages(previous => ({ ...previous, ...Object.fromEntries(generatedKeysFor(mediaId).map(key => [key, previewUrl])) }));
         completedMedia += 1;
         setAutoPipelineProgress(74 + Math.round((completedMedia / allPrompts.length) * 10));
         addLog(`✓ Media ${completedMedia}/${allPrompts.length} đã tạo và hiển thị preview.`);
@@ -2975,6 +3104,17 @@ export default function App() {
         if (!existingVoice?.exists) throw new Error("Bạn đã chọn voice bên ngoài nhưng chưa tải file voice lên. Vào tab Giọng đọc để tải file trước khi chạy.");
         audioUrl = `/api/serve-local-file?path=${encodeURIComponent(externalVoicePath)}&t=${Date.now()}`;
         addLog("✓ Dùng voice đã tải lên; bỏ qua bước tạo voice của tool.");
+      } else if (automationVoice.voiceProvider === "vieneu") {
+        const voiceResponse = await fetch("/api/vieneu/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ text: finalScript, voice: automationVoice.voiceModel, speed: Number(automationVoice.voiceSpeed) || 1, emotion: automationVoice.voiceEmotion || "natural", referenceAudioPath: automationVoice.voiceReferencePath || undefined }),
+        });
+        const voice = await voiceResponse.json();
+        if (!voiceResponse.ok || !voice.success) throw new Error(voice.error || "Không thể tạo voice VieNeu Local.");
+        audioUrl = voice.audioUrl || "";
+        addLog(`✓ VieNeu Local đã tạo voice ${automationVoice.voiceModel || "mặc định"} hoàn toàn offline.`);
       } else if (automationVoice.voiceProvider === "premium" && automationVoice.voiceId) {
         const ttsResponse = await fetch("/api/ai33/tts", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ text: finalScript, voice_id: automationVoice.voiceId, speed: Number(automationVoice.voiceSpeed) || 1 }) });
         const tts = await ttsResponse.json();
@@ -3223,7 +3363,7 @@ export default function App() {
       addLog("▶ [7/7] Đang render video cuối cùng...");
       setAutoPipelineProgress(95);
       const outputName = String(completedSeo.seoTitle || "VIDEO_HOAN_CHINH").slice(0, 90);
-      const renderResponse = await fetch("/api/render-ffmpeg", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ imgDir: mediaFolder, voiceDir: projectDir + "\\vocie", outputDir: projectDir, newProjName: outputName, resolution: visualConfig.resolution || "1080p", aspectRatio: targetAspectRatio, originalAudio: useDialogueVideoAudio ? "" : projectDir + "\\voice_original.mp3", mediaType: isVideoOutput && fallbackFailedVideosToImages ? "mixed" : isVideoOutput ? "video" : "image", useMediaAudio: useDialogueVideoAudio, motionTemplate: visualConfig.motionEnabled === false ? "none" : visualConfig.motionStyle || "auto", motionIntensity: visualConfig.motionIntensity || "gentle", subtitleEnabled: visualConfig.subtitleEnabled === true, subtitleScriptPath: visualConfig.subtitleEnabled ? projectDir + "\\step3_dialogues.txt" : "", subtitleStyle: visualConfig.subtitleStyle || "modern", subtitlePosition: visualConfig.subtitlePosition || "bottom", backgroundMusicEnabled: visualConfig.backgroundMusicEnabled === true, backgroundMusicMode: visualConfig.backgroundMusicMode || "file", backgroundMusicPath: visualConfig.backgroundMusicPath || "", backgroundMusicFolder: visualConfig.backgroundMusicFolder || "", backgroundMusicVolume: Number(visualConfig.backgroundMusicVolume || 18), watermarkType: visualConfig.watermarkType || "none", watermarkPath: visualConfig.watermarkPath || "", watermarkText: visualConfig.watermarkText || "", watermarkPosition: visualConfig.watermarkPosition || "bottom-right" }) });
+      const renderResponse = await fetch("/api/render-ffmpeg", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ imgDir: mediaFolder, voiceDir: projectDir + "\\vocie", outputDir: projectDir, newProjName: outputName, resolution: visualConfig.resolution || "1080p", aspectRatio: targetAspectRatio, originalAudio: useDialogueVideoAudio ? "" : projectDir + "\\voice_original.mp3", mediaType: isVideoOutput && fallbackFailedVideosToImages ? "mixed" : isVideoOutput ? "video" : "image", useMediaAudio: useDialogueVideoAudio, motionTemplate: visualConfig.motionEnabled === false ? "none" : visualConfig.motionStyle || "auto", motionIntensity: visualConfig.motionIntensity || "gentle", subtitleEnabled: visualConfig.subtitleEnabled === true, subtitleScriptPath: visualConfig.subtitleEnabled ? projectDir + "\\step3_dialogues.txt" : "", subtitleStyle: visualConfig.subtitleStyle || "modern", subtitlePosition: visualConfig.subtitlePosition || "bottom", backgroundMusicEnabled: visualConfig.backgroundMusicEnabled === true, backgroundMusicMode: visualConfig.backgroundMusicMode || "file", backgroundMusicPath: visualConfig.backgroundMusicPath || "", backgroundMusicFolder: visualConfig.backgroundMusicFolder || "", backgroundMusicVolume: Number(visualConfig.backgroundMusicVolume || 18), watermarkType: visualConfig.watermarkType || "none", watermarkPath: visualConfig.watermarkPath || "", watermarkText: visualConfig.watermarkText || "", watermarkPosition: visualConfig.watermarkPosition || "bottom-right", overviewZoomEnabled: visualConfig.overviewZoomEnabled === true }) });
       if (!renderResponse.ok) throw new Error((await renderResponse.json().catch(() => ({}))).error || "Render video thất bại.");
       const renderStream = await renderResponse.text();
       if (/"type"\s*:\s*"error"/i.test(renderStream)) {
@@ -4083,6 +4223,12 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok) {
+        let overviewConfig: any = {};
+        try { overviewConfig = JSON.parse(localStorage.getItem("automation_full_config_v1") || "{}"); } catch {}
+        const overviewEnabled = overviewConfig.overviewZoomEnabled === true;
+        const overviewBoards = await planOverviewBoardsFromScript(textToProcess, data.scenes || [], overviewEnabled);
+        const overviewManifest = applyScriptOverviewZoomPlan(data, overviewEnabled, overviewBoards, imageStyle, String(overviewConfig.aspectRatio || "16:9"));
+        await saveOverviewZoomManifest(projectDir, overviewManifest);
         setStoryboardData(data);
         setIsStoryboardProgrammatic(!!data.isProgrammaticFallback);
         // Khi tạo phân cảnh mới, các hình ảnh đã tạo của phân cảnh cũ bắt buộc phải xóa sạch để không dính lắp ghép lộn xộn
@@ -4757,7 +4903,18 @@ export default function App() {
 
       let audioUrl = "";
       let audioData = "";
-      if (voiceConfig.voiceProvider === "premium" && voiceConfig.voiceId) {
+      if (voiceConfig.voiceProvider === "vieneu") {
+        const response = await fetch("/api/vieneu/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ text: textToSpeak, voice: voiceConfig.voiceModel, speed: Number(voiceConfig.voiceSpeed) || 1, emotion: voiceConfig.voiceEmotion || "natural", referenceAudioPath: voiceConfig.voiceReferencePath || undefined }),
+        });
+        const result = await response.json();
+        setVoiceRegenerateProgress(82);
+        if (!response.ok || !result.success) throw new Error(result.error || "Không thể tạo giọng VieNeu Local.");
+        audioUrl = result.audioUrl || "";
+      } else if (voiceConfig.voiceProvider === "premium" && voiceConfig.voiceId) {
         const startResponse = await fetch("/api/ai33/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6404,7 +6561,7 @@ export default function App() {
                   <p className="text-[10px] font-black uppercase tracking-[.2em] text-violet-200">Bắt đầu nhanh</p><h2 className="mt-2 text-2xl font-black sm:text-3xl">Bạn muốn tạo video theo cách nào?</h2><p className="mt-3 max-w-2xl text-sm leading-6 text-violet-100">Chọn cách phù hợp với mức độ kiểm soát bạn cần. Tất cả đều sử dụng cùng một pipeline và kết quả dự án.</p>
                 </section>
                 <section className="grid gap-5 lg:grid-cols-3">
-                  <button type="button" onClick={() => setActiveStep("presetpipeline")} className="group rounded-3xl border-2 border-fuchsia-300 bg-white p-6 text-left shadow-lg shadow-fuchsia-100 transition hover:-translate-y-1 hover:shadow-xl"><span className="inline-flex rounded-full bg-fuchsia-100 px-3 py-1 text-[10px] font-black text-fuchsia-700">Dá»„ DÙNG · KHUYẾN NGHỊ</span><Sparkles className="mt-6 h-9 w-9 text-fuchsia-600" /><h3 className="mt-4 text-xl font-black text-slate-900">Tạo nhanh theo Preset</h3><p className="mt-2 text-sm leading-6 text-slate-500">Chọn mục tiêu, Voice và Style; nhập nội dung, ảnh tham chiếu rồi tạo. Các thông số còn lại được preset tự thiết lập.</p><span className="mt-6 inline-flex items-center gap-2 text-sm font-black text-fuchsia-700">Mở chế độ dễ dùng <ArrowRight className="h-4 w-4" /></span></button>
+                  <button type="button" onClick={() => setActiveStep("presetpipeline")} className="group rounded-3xl border-2 border-fuchsia-300 bg-white p-6 text-left shadow-lg shadow-fuchsia-100 transition hover:-translate-y-1 hover:shadow-xl"><span className="inline-flex rounded-full bg-fuchsia-100 px-3 py-1 text-[10px] font-black text-fuchsia-700">DỄ DÙNG · KHUYẾN NGHỊ</span><Sparkles className="mt-6 h-9 w-9 text-fuchsia-600" /><h3 className="mt-4 text-xl font-black text-slate-900">Tạo nhanh theo Preset</h3><p className="mt-2 text-sm leading-6 text-slate-500">Chọn mục tiêu, Voice và Style; nhập nội dung, ảnh tham chiếu rồi tạo. Các thông số còn lại được preset tự thiết lập.</p><span className="mt-6 inline-flex items-center gap-2 text-sm font-black text-fuchsia-700">Mở chế độ dễ dùng <ArrowRight className="h-4 w-4" /></span></button>
                   <button type="button" onClick={() => setActiveStep("autopipeline")} className="group rounded-3xl border border-indigo-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-1 hover:border-indigo-400 hover:shadow-xl"><span className="inline-flex rounded-full bg-indigo-100 px-3 py-1 text-[10px] font-black text-indigo-700">CHUYÊN SÂU</span><Sliders className="mt-6 h-9 w-9 text-indigo-600" /><h3 className="mt-4 text-xl font-black text-slate-900">Tạo tự động tùy chỉnh</h3><p className="mt-2 text-sm leading-6 text-slate-500">Điều khiển đầy đủ nội dung, nhân vật, media, Voice, SEO, phụ đề và render trên một luồng tự động.</p><span className="mt-6 inline-flex items-center gap-2 text-sm font-black text-indigo-700">Mở toàn bộ thiết lập <ArrowRight className="h-4 w-4" /></span></button>
                   <button type="button" onClick={() => setActiveStep("manualpipeline")} className="group rounded-3xl border border-emerald-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-1 hover:border-emerald-400 hover:shadow-xl"><span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black text-emerald-700">KIỂM TRA TỪNG BƯỚC</span><CheckSquare className="mt-6 h-9 w-9 text-emerald-600" /><h3 className="mt-4 text-xl font-black text-slate-900">Tạo & Review từng bước</h3><p className="mt-2 text-sm leading-6 text-slate-500">Phù hợp khi cần kiểm tra kịch bản, prompt, media, Voice và SEO trước khi chuyển sang bước tiếp theo.</p><span className="mt-6 inline-flex items-center gap-2 text-sm font-black text-emerald-700">Mở chế độ review <ArrowRight className="h-4 w-4" /></span></button>
                 </section>

@@ -129,6 +129,115 @@ const FFMPEG_PATH = typeof ffmpegStatic === "string" && ffmpegStatic
   ? ffmpegStatic
   : "ffmpeg";
 
+type VieNeuResponse = Record<string, any> & { id: string; success: boolean; error?: string };
+let vieneuWorker: ReturnType<typeof spawn> | null = null;
+let vieneuBuffer = "";
+let vieneuSequence = 0;
+const vieneuPending = new Map<string, { resolve: (value: VieNeuResponse) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+
+function getVieNeuLauncher(workerPath: string) {
+  const pythonCandidates = [
+    process.env.VIENEU_PYTHON_PATH,
+    path.join(persistentDataDir, "vieneu-python", "python.exe"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const python = pythonCandidates.find(candidate => fs.existsSync(candidate));
+  if (python) return { command: python, args: ["-u", workerPath], description: python };
+
+  const uvCandidates = [
+    process.env.UV_PATH,
+    path.join(process.cwd(), "runtime", "uv.exe"),
+    path.join(os.homedir(), ".local", "bin", "uv.exe"),
+    "uv.exe",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const uv = uvCandidates.find(candidate => candidate === "uv.exe" || fs.existsSync(candidate)) || "uv.exe";
+  return {
+    command: uv,
+    args: ["run", "--python", "3.12", "--with", "vieneu>=3.2.3,<3.3", "python", "-u", workerPath],
+    description: `${uv} (môi trường VieNeu tự quản lý)`,
+  };
+}
+
+function stopVieNeuWorker(reason: string) {
+  const worker = vieneuWorker;
+  vieneuWorker = null;
+  vieneuBuffer = "";
+  for (const pending of vieneuPending.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(reason));
+  }
+  vieneuPending.clear();
+  try { worker?.kill(); } catch {}
+}
+
+function ensureVieNeuWorker() {
+  if (vieneuWorker && !vieneuWorker.killed) return vieneuWorker;
+  const workerPath = path.join(process.cwd(), "python_scripts", "vieneu_worker.py");
+  if (!fs.existsSync(workerPath)) throw new Error("Thiếu python_scripts/vieneu_worker.py trong bộ cài.");
+  const launcher = getVieNeuLauncher(workerPath);
+  const cacheDir = path.join(persistentDataDir, "vieneu-uv-cache");
+  const pythonDir = path.join(persistentDataDir, "vieneu-python");
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.mkdirSync(pythonDir, { recursive: true });
+  const worker = spawn(launcher.command, launcher.args, {
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8", UV_CACHE_DIR: cacheDir, UV_PYTHON_INSTALL_DIR: pythonDir },
+  });
+  vieneuWorker = worker;
+  worker.stdout?.on("data", chunk => {
+    vieneuBuffer += chunk.toString("utf8");
+    const lines = vieneuBuffer.split(/\r?\n/);
+    vieneuBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const response = JSON.parse(line) as VieNeuResponse;
+        const pending = vieneuPending.get(response.id);
+        if (!pending) continue;
+        clearTimeout(pending.timer);
+        vieneuPending.delete(response.id);
+        response.success ? pending.resolve(response) : pending.reject(new Error(response.error || "VieNeu xử lý thất bại."));
+      } catch (error) {
+        console.warn("[VieNeu] Worker trả dữ liệu không hợp lệ:", line, error);
+      }
+    }
+  });
+  worker.stderr?.on("data", chunk => console.log(`[VieNeu] ${chunk.toString("utf8").trim()}`));
+  worker.once("error", error => stopVieNeuWorker(`Không thể chạy VieNeu: ${error.message}`));
+  worker.once("exit", code => stopVieNeuWorker(`VieNeu worker đã dừng (code ${code ?? "unknown"}).`));
+  return worker;
+}
+
+function requestVieNeu(command: string, payload: Record<string, unknown> = {}, timeoutMs = 30 * 60_000) {
+  return new Promise<VieNeuResponse>((resolve, reject) => {
+    const id = `vieneu-${Date.now()}-${++vieneuSequence}`;
+    let worker: ReturnType<typeof spawn>;
+    try { worker = ensureVieNeuWorker(); } catch (error) { reject(error); return; }
+    const timer = setTimeout(() => {
+      vieneuPending.delete(id);
+      reject(new Error("VieNeu quá thời gian xử lý. Lần đầu có thể cần tải model khoảng 1.7 GB."));
+    }, timeoutMs);
+    vieneuPending.set(id, { resolve, reject, timer });
+    worker.stdin?.write(JSON.stringify({ id, command, ...payload }) + "\n", "utf8", error => {
+      if (!error) return;
+      clearTimeout(timer);
+      vieneuPending.delete(id);
+      reject(error);
+    });
+  });
+}
+
+function runVieNeuFfmpeg(args: string[], timeoutMs = 10 * 60_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(FFMPEG_PATH, args, { windowsHide: true });
+    let stderr = "";
+    const timer = setTimeout(() => { child.kill(); reject(new Error("Quá thời gian chỉnh tốc độ voice VieNeu.")); }, timeoutMs);
+    child.stderr.on("data", chunk => { stderr += String(chunk); });
+    child.once("error", error => { clearTimeout(timer); reject(error); });
+    child.once("close", code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(stderr.trim() || "FFmpeg không xử lý được voice VieNeu.")); });
+  });
+}
+
 const WATERMARK_TOOL_PACKAGE = "remove-ai-watermarks[video,migan]";
 
 function runWatermarkProcess(command: string, args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -3013,10 +3122,11 @@ app.post("/api/process-script", async (req, res) => {
       }
 
       let prompt = "";
+      const enumeratedMarkerInstruction = "\nCRITICAL SPOKEN ENUMERATION RULE: Preserve EVERY spoken numbered/lettered item and its number in the same narrative position. Translate only the label when needed: Phan/Phần -> Part, Buoc/Bước -> Step, Cap do/Cấp độ -> Level, Kieu/Kiểu -> Type, Loai/Loại -> Category, Giai doan/Giai đoạn -> Stage, Muc/Mức -> Level, Hang/Hạng -> Rank, Truong hop/Trường hợp -> Case. Examples: Cấp độ 1 must become Level 1; Cấp độ 2 must become Level 2. Never delete, merge, renumber, summarize, or treat these spoken markers as technical scene headings. Remove only explicit CANH/SCENE production headings.\n";
       const strictRules = "\nKHÔNG ĐƯỢC thêm bất kỳ lời bình luận, câu chào hỏi, lời hứa hẹn quảng cáo hay câu giới thiệu giải thích nào ở đầu hoặc cuối kết quả (Tuyệt đối KHÔNG viết: 'Dưới đây là...', 'Đây là bản dịch...', '***', '---', v.v.). CHỈ xuất ra duy nhất văn bản kịch bản hoàn chỉnh, sạch sẽ.";
 
       if (editRequest && editRequest.trim()) {
-        prompt = langInstruction + strictRules + "\n" +
+        prompt = langInstruction + strictRules + enumeratedMarkerInstruction + "\n" +
           "Bạn nhận được một yêu cầu chỉnh sửa kịch bản đặc biệt từ phía người dùng: \"" + editRequest + "\".\n" +
           "Hãy đọc kịch bản hiện tại bên dưới và thực hiện chỉnh sửa nó theo chính xác yêu cầu của người dùng (ví dụ: thay đổi tên nước, đổi nhân vật, điều chỉnh một số chi tiết cốt truyện, chỉnh phong cách...).\n" +
           "Lưu ý:\n" +
@@ -3103,13 +3213,13 @@ Hãy thể hiện đúng định hướng này bằng nhịp câu, từ vựng v
           : "";
         const storytellingNarrationInstruction = rewriteScript && !affiliateInstruction
           ? `\n🎙️ CHẾ ĐỘ LỜI KỂ VIDEO: Nếu văn bản nguồn có dạng kịch bản điện ảnh/sân khấu, hãy chuyển nó thành lời kể liền mạch, tự nhiên để người đọc voice có thể đọc trực tiếp.
-- Các nhãn cấu trúc như "CẢNH 1", "CẢNH 2", "SCENE 1", số thứ tự cảnh, tiêu đề địa điểm/thời gian và chỉ dẫn sản xuất chỉ dùng để hiểu cấu trúc; TUYỆT ĐỐI không đọc hoặc viết thành "Cảnh một:", "Cảnh hai:", "Phần một:" trong kết quả.
+- Remove only technical production headings such as "CANH 1 / SCENE 1" and camera/location notes. NEVER remove a spoken enumerated item such as "Phan 1", "Buoc 1", "Cap do 1", "Kieu 1", "Loai 1", "Giai doan 1", or their translated equivalents.
 - Dùng câu chuyển cảnh tự nhiên như "Đúng lúc ấy", "Giữa màn mưa", "Ngay khi..." thay cho việc đọc số cảnh.
 - Giữ ĐẦY ĐỦ diễn biến, hành động, lời thoại, nhân vật, cao trào và kết thúc của TẤT CẢ các cảnh. Không được kể kỹ cảnh đầu rồi tóm tắt các cảnh sau thành một câu.
 - Chuyển lời thoại sang văn kể tự nhiên nhưng vẫn giữ nguyên ý và người nói, ví dụ: Yumi hoảng hốt hỏi..., Akira quả quyết đáp....
 - Chỉ xuất nội dung có thể dùng ngay làm voice kể chuyện; không xuất tiêu đề kịch bản, danh sách cảnh, ghi chú quay phim hay dòng giải thích.\n`
           : "";
-        prompt = langInstruction + strictRules + affiliateInstruction + presetWritingInstruction + factualDisciplineInstruction + rewriteInstruction + storytellingNarrationInstruction + extraInstruction + "\n" +
+        prompt = langInstruction + strictRules + enumeratedMarkerInstruction + affiliateInstruction + presetWritingInstruction + factualDisciplineInstruction + rewriteInstruction + storytellingNarrationInstruction + extraInstruction + "\n" +
           "Sửa lại cấu trúc Viết hoa chữ cái đầu câu, ngắt dấu chấm phẩy rõ ràng, không bỏ bớt hoặc thêm thắt bối cảnh cốt truyện chính ngoài các yêu cầu viết lại đặc biệt ở trên.\n" +
           "Giữ nguyên bối cảnh và các sự kiện trong câu chuyện. Thêm các phân đoạn rõ ràng bằng dòng trống (xuống dòng kép).\n\n" +
           "Văn bản gốc cần trau chuốt/biên dịch:\n" +
@@ -3167,7 +3277,7 @@ Hãy thể hiện đúng định hướng này bằng nhịp câu, từ vựng v
         const maxDelta = Math.max(3, Math.round(exactTargetWords * exactTargetTolerance));
         if (Math.abs(currentWords - exactTargetWords) > maxDelta) {
           try {
-            const correctionPrompt = `Rewrite the following narration to EXACTLY about ${exactTargetWords} spoken words (allowed range ${exactTargetWords - maxDelta} to ${exactTargetWords + maxDelta}). Preserve its language, every character, every scene event, dialogue, climax, ending and all essential calls to action. Do not summarize or omit later events. Never add spoken structure labels such as "Cảnh một", "Cảnh hai", "Scene 1" or "Phần một". Do not add any notes, title, word count or explanation. Return only the finished continuous narration.\n\nNARRATION:\n${finalScript}`;
+            const correctionPrompt = `Rewrite the following narration to about ${exactTargetWords} spoken words (allowed range ${exactTargetWords - maxDelta} to ${exactTargetWords + maxDelta}). Preserve its language, every character, every scene event, dialogue, climax, ending, calls to action, and EVERY spoken enumerated marker with its original number. Never remove or merge markers such as Part 1, Step 1, Level 1, Type 1, Category 1, Stage 1, Rank 1, or Case 1. Remove only technical production headings such as SCENE 1. Do not add notes, a title, word count, or explanation. Return only the finished narration.\n\nNARRATION:\n${finalScript}`;
             const corrected = await generateContentWithFallback(getGeminiClient(), {
               model: "gemini-1.5-flash",
               contents: correctionPrompt,
@@ -4452,7 +4562,77 @@ app.post("/api/translate-storyboard", async (req, res) => {
 // Guaranteed local fallback for the one-click pipeline. It deliberately does
 // not call an external model, so an AI timeout cannot strand the run at the
 // storyboard stage.
-app.post("/api/generate-storyboard-fallback", (req, res) => {
+// Analyze the actual narration before creating overview boards.  This is kept
+// separate from normal storyboarding so the legacy pipeline remains unchanged.
+app.post("/api/plan-overview-zoom", async (req, res) => {
+  try {
+    const scenes = Array.isArray(req.body?.scenes) ? req.body.scenes : [];
+    const script = String(req.body?.script || "").trim();
+    if (scenes.length < 2) return res.json({ success: true, boards: [] });
+    const compactScenes = scenes.map((scene: any, index: number) => ({
+      sceneNumber: Number(scene?.sceneNumber || index + 1),
+      text: String(scene?.text || scene?.imagePrompts?.[0]?.subText || "").replace(/\s+/g, " ").trim().slice(0, 340),
+    }));
+    const ai = getGeminiClient();
+    const prompt = `Analyze this Vietnamese or English narration and find EXPLICIT ENUMERATED SPOKEN ITEMS that should share one overview board. A marker may appear anywhere in a spoken sentence, not only at the beginning. Vietnamese examples: "Phần 1", "Bước 1", "Cấp độ 1", "Kiểu 1", "Loại 1", "Giai đoạn 1", "Mức 1", "Hạng 1", "Trường hợp 1". English examples: "Part 1", "Step 1", "Level 1", "Type 1", "Category 1", "Stage 1", "Rank 1", "Case 1". Create one board only when at least two items belong to the same named series. For each item, map the exact sceneNumber where that marker is spoken and retain its short spoken label. Do not infer a series if the script contains no explicit repeated markers. Do not group ordinary topic changes. A scene may appear in only one board. Return boards in narration order.\n\nSCRIPT:\n${script.slice(0, 18000)}\n\nSCENES:\n${JSON.stringify(compactScenes)}`;
+    const response = await generateContentWithFallback(ai, {
+      model: "gemini-1.5-flash",
+      contents: prompt,
+      config: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          required: ["boards"],
+          properties: {
+            boards: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                required: ["title", "items"],
+                properties: {
+                  title: { type: Type.STRING },
+                  items: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      required: ["sceneNumber", "label"],
+                      properties: {
+                        sceneNumber: { type: Type.NUMBER },
+                        label: { type: Type.STRING },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const parsed = JSON.parse(String(response?.text || "{}").trim() || "{}");
+    const maxScene = compactScenes.length;
+    const usedScenes = new Set<number>();
+    const boards: any[] = [];
+    for (const board of Array.isArray(parsed?.boards) ? parsed.boards : []) {
+      const items: any[] = [];
+      for (const rawItem of Array.isArray(board?.items) ? board.items : []) {
+        const sceneNumber = Math.max(1, Math.min(maxScene, Math.round(Number(rawItem?.sceneNumber))));
+        if (!Number.isFinite(sceneNumber) || usedScenes.has(sceneNumber)) continue;
+        const label = String(rawItem?.label || compactScenes[sceneNumber - 1]?.text || "").replace(/\s+/g, " ").trim().slice(0, 120);
+        if (!label) continue;
+        items.push({ sceneNumber, label });
+      }
+      items.sort((a, b) => a.sceneNumber - b.sceneNumber);
+      if (items.length < 2) continue;
+      items.forEach(item => usedScenes.add(item.sceneNumber));
+      boards.push({ title: String(board?.title || "").replace(/\s+/g, " ").trim().slice(0, 100), items });
+    }
+    res.json({ success: true, boards });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || "Không thể phân tích các mục đánh số trong kịch bản." });
+  }
+});app.post("/api/generate-storyboard-fallback", (req, res) => {
   try {
     const script = typeof req.body?.script === "string" ? req.body.script : "";
     if (!script.trim()) return res.status(400).json({ error: "Missing script" });
@@ -5060,6 +5240,74 @@ app.post("/api/generate-free-tts", async (req, res) => {
     res.status(500).json({ error: error.message || "Không thể tạo giọng miễn phí cục bộ." });
   } finally {
     [inputPath, outputPath, scriptPath].forEach(file => { try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {} });
+  }
+});
+
+app.get("/api/vieneu/status", async (_req, res) => {
+  try {
+    const status = await requestVieNeu("probe", {}, 120_000);
+    const launcher = getVieNeuLauncher(path.join(process.cwd(), "python_scripts", "vieneu_worker.py"));
+    res.json({ success: true, ...status, runtime: launcher.description });
+  } catch (error: any) {
+    res.status(503).json({ success: false, installed: false, error: error?.message || "Không kiểm tra được VieNeu." });
+  }
+});
+
+app.get("/api/vieneu/voices", async (_req, res) => {
+  try {
+    const result = await requestVieNeu("voices");
+    res.json({ success: true, loaded: true, voices: result.voices || [] });
+  } catch (error: any) {
+    res.status(503).json({ success: false, error: error?.message || "Không tải được thư viện giọng VieNeu." });
+  }
+});
+
+app.post("/api/vieneu/reference", express.raw({ type: "application/octet-stream", limit: "30mb" }), (req, res) => {
+  try {
+    const original = path.basename(String(req.query?.name || "reference.wav"));
+    const extension = [".wav", ".mp3", ".m4a", ".flac", ".ogg"].includes(path.extname(original).toLowerCase()) ? path.extname(original).toLowerCase() : ".wav";
+    const directory = path.join(persistentDataDir, "vieneu-references");
+    fs.mkdirSync(directory, { recursive: true });
+    const filePath = path.join(directory, `${Date.now()}-${crypto.randomBytes(5).toString("hex")}${extension}`);
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+    if (!body.length) return res.status(400).json({ success: false, error: "Audio mẫu bị trống." });
+    fs.writeFileSync(filePath, body);
+    res.json({ success: true, path: filePath, name: original });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || "Không lưu được audio mẫu VieNeu." });
+  }
+});
+
+app.post("/api/vieneu/tts", async (req, res) => {
+  const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "vidiflow-vieneu-"));
+  const rawOutput = path.join(jobDir, "voice.wav");
+  const adjustedOutput = path.join(jobDir, "voice-adjusted.wav");
+  try {
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ success: false, error: "Nội dung tạo voice không được để trống." });
+    if (text.length > 100_000) return res.status(413).json({ success: false, error: "Kịch bản VieNeu vượt quá 100.000 ký tự." });
+    const voice = String(req.body?.voice || req.body?.voiceName || "").trim() || undefined;
+    const emotion = String(req.body?.emotion || "natural").toLowerCase();
+    const style = ["dramatic", "serious", "storytelling"].includes(emotion) ? "doc_truyen" : "tu_nhien";
+    const result = await requestVieNeu("synthesize", {
+      text, voice, style,
+      referenceAudioPath: req.body?.referenceAudioPath || undefined,
+      outputPath: rawOutput,
+      applyWatermark: req.body?.applyWatermark !== false,
+    });
+    if (!fs.existsSync(rawOutput)) throw new Error("VieNeu không tạo được file WAV đầu ra.");
+    const speed = Math.max(0.5, Math.min(2, Number(req.body?.speed) || 1));
+    let finalOutput = rawOutput;
+    if (Math.abs(speed - 1) > 0.001) {
+      await runVieNeuFfmpeg(["-y", "-i", rawOutput, "-filter:a", `atempo=${speed}`, adjustedOutput]);
+      if (!fs.existsSync(adjustedOutput)) throw new Error("Không thể chỉnh tốc độ voice VieNeu.");
+      finalOutput = adjustedOutput;
+    }
+    res.json({ success: true, provider: "vieneu-local", voiceName: result.voice || voice, sampleRate: result.sampleRate || 48_000, audioUrl: `data:audio/wav;base64,${fs.readFileSync(finalOutput).toString("base64")}` });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || "Không thể tạo giọng bằng VieNeu Local." });
+  } finally {
+    try { fs.rmSync(jobDir, { recursive: true, force: true }); } catch {}
   }
 });
 
@@ -6659,7 +6907,7 @@ app.post("/api/timeline/run-command", (req, res) => {
 
 app.post("/api/render-ffmpeg", async (req, res) => {
   try {
-    const { imgDir, voiceDir, outputDir, newProjName, resolution, aspectRatio, originalAudio, mediaType, useMediaAudio = false, smartDialogueCut = false, motionTemplate = "auto", motionIntensity = "gentle", subtitleEnabled = false, subtitleScriptPath = "", subtitleStyle = "modern", subtitlePosition = "bottom", backgroundMusicEnabled = false, backgroundMusicMode = "file", backgroundMusicPath = "", backgroundMusicFolder = "", backgroundMusicVolume = 18, watermarkType = "image", watermarkPath = "", watermarkText = "", watermarkPosition = "bottom-right" } = req.body;
+    const { imgDir, voiceDir, outputDir, newProjName, resolution, aspectRatio, originalAudio, mediaType, useMediaAudio = false, smartDialogueCut = false, motionTemplate = "auto", motionIntensity = "gentle", subtitleEnabled = false, subtitleScriptPath = "", subtitleStyle = "modern", subtitlePosition = "bottom", backgroundMusicEnabled = false, backgroundMusicMode = "file", backgroundMusicPath = "", backgroundMusicFolder = "", backgroundMusicVolume = 18, watermarkType = "image", watermarkPath = "", watermarkText = "", watermarkPosition = "bottom-right", overviewZoomEnabled = false } = req.body;
     if (!imgDir || !outputDir || !newProjName) {
       return res.status(400).json({ success: false, error: "Missing required directories or project name" });
     }
@@ -6692,6 +6940,22 @@ app.post("/api/render-ffmpeg", async (req, res) => {
       ? fs.readdirSync(resolvedImgDir).filter(f => isUsableGeneratedMediaFile(f) && validMediaExts.some(ext => f.toLowerCase().endsWith(ext))).sort(naturalSort)
       : [];
     
+    const overviewZoomByCode = new Map<string, any>();
+    try {
+      const overviewManifestPath = path.join(path.resolve(outputDir), "overview_zoom_manifest.json");
+      if (overviewZoomEnabled === true && fs.existsSync(overviewManifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(overviewManifestPath, "utf8"));
+        if (manifest?.enabled === true && Array.isArray(manifest.entries)) {
+          for (const entry of manifest.entries) {
+            const match = String(entry?.code || "").match(/P(\d+)[._-](\d+)/i);
+            if (match) overviewZoomByCode.set(`P${Number(match[1])}_${Number(match[2])}`, entry);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("[overview-zoom] Ignoring invalid manifest:", error);
+    }
+
     const validVoiceExts = ['.mp3', '.wav'];
     const allVoices = voiceDir && fs.existsSync(voiceDir)
       ? fs.readdirSync(voiceDir).filter(f => validVoiceExts.some(ext => f.toLowerCase().endsWith(ext))).sort(naturalSort)
@@ -6783,17 +7047,31 @@ app.post("/api/render-ffmpeg", async (req, res) => {
     if (!retainVideoAudio && !fs.existsSync(manifestPath)) throw new Error("Chưa có voice_manifest.json. Hãy chạy Cắt voice trước để giữ đúng timeline voice gốc.");
     const manifest = retainVideoAudio ? { scenes: [] } : JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     let timeline = Array.isArray(manifest.scenes) ? manifest.scenes : [];
-    const timelineCodes = new Set(timeline.map((entry: any) => String(entry?.code || "")
-      .toUpperCase().replace(/[^P\d]+/g, "_").replace(/^_+|_+$/g, "")).filter(Boolean));
-    if (timelineCodes.size === timeline.length && images.length !== timeline.length) {
-      const matchingImages = images.filter(file => {
+    const normalizeTimelineCode = (value: unknown) => String(value || "")
+      .toUpperCase().replace(/[^P\d]+/g, "_").replace(/^_+|_+$/g, "");
+    const timelineCodes = new Set(timeline.map((entry: any) => normalizeTimelineCode(entry?.code)).filter(Boolean));
+    if (timelineCodes.size === timeline.length) {
+      const imageByCode = new Map<string, string>();
+      for (const file of images) {
         const match = file.match(/P(\d+)[._-](\d+)/i);
-        const code = match ? `P${match[1]}_${match[2]}`.toUpperCase() : "";
-        return code && timelineCodes.has(code);
-      });
-      if (matchingImages.length === timeline.length) {
-        sendLog(`-> Đã chọn đúng ${matchingImages.length} media theo voice manifest và bỏ qua ${images.length - matchingImages.length} file cũ/ngoài script.`);
-        images = matchingImages;
+        if (!match) continue;
+        const code = normalizeTimelineCode(`P${match[1]}.${match[2]}`);
+        if (!imageByCode.has(code)) imageByCode.set(code, file);
+      }
+      const orderedImages = timeline.map((entry: any) => imageByCode.get(normalizeTimelineCode(entry?.code)) || "");
+      if (orderedImages.every(Boolean)) {
+        const changed = orderedImages.some((file: string, index: number) => file !== images[index]);
+        if (changed || images.length !== timeline.length) {
+          sendLog(`-> Đã sắp xếp ${orderedImages.length} media theo mã prompt trong voice manifest; bỏ qua file cũ/ngoài script.`);
+        }
+        images = orderedImages;
+      } else if (images.length !== timeline.length) {
+        const matchingImages = images.filter(file => {
+          const match = file.match(/P(\d+)[._-](\d+)/i);
+          const code = match ? normalizeTimelineCode(`P${match[1]}.${match[2]}`) : "";
+          return code && timelineCodes.has(code);
+        });
+        if (matchingImages.length === timeline.length) images = matchingImages;
       }
     }
     const sourceAudio = retainVideoAudio ? "" : String(originalAudio || manifest.sourceAudio || "").trim();
@@ -6900,7 +7178,22 @@ app.post("/api/render-ffmpeg", async (req, res) => {
     const pairCount = images.length;
 
     for (let i = 0; i < pairCount; i++) {
-      const imgPath = path.join(resolvedImgDir, images[i]);
+      const slotFile = images[i];
+      const overviewCodeMatch = slotFile.match(/P(\d+)[._-](\d+)/i);
+      const overviewCode = overviewCodeMatch ? `P${Number(overviewCodeMatch[1])}_${Number(overviewCodeMatch[2])}` : "";
+      const overviewEntry = overviewCode ? overviewZoomByCode.get(overviewCode) : null;
+      let renderFile = slotFile;
+      if (overviewEntry?.sourceCode) {
+        const sourceMatch = String(overviewEntry.sourceCode).match(/P(\d+)[._-](\d+)/i);
+        const sourceKey = sourceMatch ? `P${Number(sourceMatch[1])}_${Number(sourceMatch[2])}` : "";
+        const masterFile = sourceKey ? images.find((file: string) => {
+          const match = file.match(/P(\d+)[._-](\d+)/i);
+          return match && `P${Number(match[1])}_${Number(match[2])}` === sourceKey;
+        }) : undefined;
+        if (masterFile) renderFile = masterFile;
+        else sendLog(`-> KhÃ´ng tÃ¬m tháº¥y áº£nh báº£ng chung ${overviewEntry.sourceCode}; dÃ¹ng media hiá»‡n táº¡i.`);
+      }
+      const imgPath = path.join(resolvedImgDir, renderFile);
       // The final mux always uses the uninterrupted original voice.  A
       // per-scene voice file is optional and is only used to validate a
       // Whisper timeline, so do not construct a path when no cuts exist.
@@ -6916,6 +7209,7 @@ app.post("/api/render-ffmpeg", async (req, res) => {
       // image and is held for timeline[i].durationMs; MP4/MOV slots remain
       // videos. This preserves the exact script/voice order and duration.
       const isVideo = ['.mp4', '.mov'].includes(path.extname(imgPath).toLowerCase());
+      const activeOverviewEntry = !isVideo ? overviewEntry : null;
       
       const resMap: any = {
         "1080p": { "16:9": "1920:1080", "9:16": "1080:1920", "1:1": "1080:1080" },
@@ -6971,14 +7265,29 @@ app.post("/api/render-ffmpeg", async (req, res) => {
         diagonal_tl_to_br: { z: panZoom, x: `(iw-iw/zoom)*(${easedProgress})`, y: `(ih-ih/zoom)*(${easedProgress})` },
         diagonal_bl_to_tr: { z: panZoom, x: `(iw-iw/zoom)*(${easedProgress})`, y: `(ih-ih/zoom)*(1-(${easedProgress}))` },
       };
-      const motion = motionExpressions[selectedMotion];
+      const overviewCols = Math.max(1, Math.min(4, Number(activeOverviewEntry?.cols || 1)));
+      const overviewRows = Math.max(1, Math.min(4, Number(activeOverviewEntry?.rows || 1)));
+      const overviewFocusIndex = Math.max(0, Math.min(overviewCols * overviewRows - 1, Number(activeOverviewEntry?.focusIndex || 0)));
+      const overviewFocusCol = overviewFocusIndex % overviewCols;
+      const overviewFocusRow = Math.floor(overviewFocusIndex / overviewCols);
+      const overviewCenterX = ((overviewFocusCol + 0.5) / overviewCols).toFixed(6);
+      const overviewCenterY = ((overviewFocusRow + 0.5) / overviewRows).toFixed(6);
+      const overviewTargetZoom = Math.max(1.7, overviewCols * 0.94).toFixed(3);
+      const overviewPhase = `max(0,min(1,((${easedProgress})-0.18)/0.82))`;
+      const overviewMotion = {
+        z: `1+(${overviewTargetZoom}-1)*(${overviewPhase})`,
+        x: `max(0,min(iw-iw/zoom,iw*${overviewCenterX}-iw/(2*zoom)))`,
+        y: `max(0,min(ih-ih/zoom,ih*${overviewCenterY}-ih/(2*zoom)))`,
+      };
+      const effectiveMotionName = activeOverviewEntry ? "overview_zoom" : selectedMotion;
+      const motion = activeOverviewEntry ? overviewMotion : motionExpressions[selectedMotion];
       const stillImageFilter = `[0:v]scale=${resStr}:force_original_aspect_ratio=decrease,pad=${resStr}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${motionFps},format=yuv420p[v]`;
-      const imageFilter = selectedMotion === "none"
+      const imageFilter = effectiveMotionName === "none"
         ? stillImageFilter
         : `[0:v]scale=${motionSourceRes}:force_original_aspect_ratio=increase,crop=${motionSourceRes},setsar=1,zoompan=z='${motion.z}':d=${frameCount}:x='${motion.x}':y='${motion.y}':s=${zoompanSize}:fps=${motionFps},format=yuv420p[v]`;
       const videoFilter = `[0:v]scale=${resStr}:force_original_aspect_ratio=increase,crop=${resStr},setsar=1,fps=${motionFps},format=yuv420p[v]`;
       const filterComplex = isVideo ? videoFilter : imageFilter;
-      if (!isVideo) sendLog(`-> Motion: ${selectedMotion}`);
+      if (!isVideo) sendLog(activeOverviewEntry ? `-> Tổng quan chương ${activeOverviewEntry.groupId || "?"}: giữ toàn cảnh 18% rồi zoom ô ${overviewFocusIndex + 1}/${overviewCols * overviewRows}.` : `-> Motion: ${selectedMotion}`);
 
       const ffmpegArgs = isVideo
         ? ["-nostdin", ...(retainVideoAudio && smartDialogueCut ? ["-ss", videoStartSec] : []), "-i", imgPath, "-filter_complex", filterComplex, "-map", "[v]", ...(retainVideoAudio ? ["-map", "0:a?"] : ["-an"]), "-t", durationSec, "-c:v", "libx264", ...(retainVideoAudio ? ["-c:a", "aac", "-b:a", "192k", "-shortest"] : []), "-pix_fmt", "yuv420p", "-y", outSeg]
@@ -7248,6 +7557,21 @@ app.post("/api/save-file", (req, res) => {
 // ==========================================
 // DOWNLOAD AUDIO API
 // ==========================================
+app.post("/api/copy-local-file", (req, res) => {
+  try {
+    const sourcePath = resolveCompatibleProjectPath(String(req.body?.sourcePath || ""));
+    const targetPath = resolveCompatibleProjectPath(String(req.body?.targetPath || ""));
+    if (!sourcePath || !targetPath || !fs.existsSync(sourcePath)) {
+      return res.status(400).json({ success: false, error: "Missing source/target file" });
+    }
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.copyFileSync(sourcePath, targetPath);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error?.message || "Copy failed" });
+  }
+});
+
 app.post("/api/download-audio", async (req, res) => {
   try {
     const { url, audioData, path: rawPath } = req.body;
@@ -7424,6 +7748,27 @@ app.post("/api/list-project-media", (req, res) => {
 // ==========================================
 // NATIVE DIALOG PICKER & SERVE LOCAL FILES
 // ==========================================
+app.post("/api/upload-reference-image-file", express.raw({ type: ["image/png", "image/jpeg", "image/webp"], limit: Number.MAX_SAFE_INTEGER }), (req, res) => {
+  try {
+    const fileName = String(req.query.fileName || "reference.png");
+    const projectDir = String(req.query.projectDir || "");
+    const mime = String(req.headers["content-type"] || "").split(";")[0].toLowerCase();
+    if (!["image/png", "image/jpeg", "image/webp"].includes(mime)) return res.status(400).json({ success: false, error: "Ảnh phải là PNG, JPG hoặc WebP." });
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!buffer.length) return res.status(400).json({ success: false, error: "File ảnh tham chiếu đang trống." });
+    const root = projectDir ? resolveCompatibleProjectPath(projectDir) : path.join(process.cwd(), "data", "reference-images");
+    const targetDir = path.join(root, "references");
+    fs.mkdirSync(targetDir, { recursive: true });
+    const ext = mime === "image/png" ? ".png" : mime === "image/webp" ? ".webp" : ".jpg";
+    const safeBaseName = path.basename(fileName).replace(/[^a-z0-9_-]/gi, "_").slice(0, 60) || "reference";
+    const savedPath = path.join(targetDir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeBaseName.replace(/\.[^.]+$/, "")}${ext}`);
+    fs.writeFileSync(savedPath, buffer);
+    res.json({ success: true, path: savedPath, url: `/api/serve-local-file?path=${encodeURIComponent(savedPath)}`, size: buffer.length });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error?.message || "Không thể lưu ảnh tham chiếu." });
+  }
+});
+
 app.post("/api/upload-reference-image", (req, res) => {
   try {
     const { imageData, fileName = "reference.png", projectDir = "" } = req.body || {};

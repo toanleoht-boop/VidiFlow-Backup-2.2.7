@@ -32,13 +32,15 @@ try {
   Copy-Item (Join-Path $root 'python_scripts') (Join-Path $app 'python_scripts') -Recurse -Force
   Copy-Item (Join-Path $root 'capcut_ultra_tool.py') (Join-Path $app 'capcut_ultra_tool.py') -Force
   Copy-Item (Join-Path $root 'windows_runtime') (Join-Path $app 'runtime') -Recurse -Force
+  $uvExe = (Get-Command uv -ErrorAction Stop).Source
+  Copy-Item $uvExe (Join-Path $app 'runtime\uv.exe') -Force
   @{ version = $Version; built_at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $app 'version.json') -Encoding utf8
 
   if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
   Compress-Archive -Path $launcherDist -DestinationPath $zipPath -CompressionLevel Optimal
   $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
   try {
-    $expected = @('vidiflow_launcher.dist\VidiFlow OneClick.exe','vidiflow_launcher.dist\app\dist\server.cjs','vidiflow_launcher.dist\app\runtime\node\node.exe')
+    $expected = @('vidiflow_launcher.dist\VidiFlow OneClick.exe','vidiflow_launcher.dist\app\dist\server.cjs','vidiflow_launcher.dist\app\runtime\node\node.exe','vidiflow_launcher.dist\app\runtime\uv.exe','vidiflow_launcher.dist\app\python_scripts\vieneu_worker.py')
     foreach ($entry in $expected) { if ($null -eq $archive.GetEntry($entry)) { throw "Portable ZIP verification failed: $entry is missing" } }
   } finally { $archive.Dispose() }
   $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash

@@ -22,6 +22,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { VoiceSelectionDialog, Voice } from "./VoiceSelectionDialog";
+import VieNeuVoiceLibrary from "./VieNeuVoiceLibrary";
 import { vidiflowPrompt } from "./VidiFlowDialogCenter";
 
 const SUBTITLE_STYLE_PRESETS = [
@@ -103,6 +104,9 @@ type AutoConfig = {
   voiceSpeed: string;
   voicePitch: string;
   voiceEmotion: string;
+  voiceLanguage: "vi" | "en" | "bilingual";
+  voiceReferencePath: string;
+  voiceReferenceName: string;
   seoTone: string;
   targetKeywords: string;
   includeTracklist: boolean;
@@ -113,6 +117,8 @@ type AutoConfig = {
   motionEnabled: boolean;
   motionStyle: string;
   motionIntensity: string;
+  overviewZoomEnabled: boolean;
+  overviewZoomGroupSize: number;
   subtitleEnabled: boolean;
   subtitleStyle: string;
   subtitlePosition: string;
@@ -182,6 +188,9 @@ const DEFAULT_CONFIG: AutoConfig = {
   voiceSpeed: "1.0",
   voicePitch: "0",
   voiceEmotion: "natural",
+  voiceLanguage: "vi",
+  voiceReferencePath: "",
+  voiceReferenceName: "",
   seoTone: "curiosity",
   targetKeywords: "",
   includeTracklist: false,
@@ -192,6 +201,8 @@ const DEFAULT_CONFIG: AutoConfig = {
   motionEnabled: true,
   motionStyle: "auto",
   motionIntensity: "gentle",
+  overviewZoomEnabled: false,
+  overviewZoomGroupSize: 6,
   subtitleEnabled: false,
   subtitleStyle: "modern",
   subtitlePosition: "bottom",
@@ -701,6 +712,7 @@ export default function AutomationControlCenter(props: Props) {
   const [externalVoiceUrl, setExternalVoiceUrl] = useState("");
   const [externalVoiceName, setExternalVoiceName] = useState("");
   const [voiceLibraryOpen, setVoiceLibraryOpen] = useState(false);
+  const [vieneuLibraryOpen, setVieneuLibraryOpen] = useState(false);
   const [previewingFreeVoice, setPreviewingFreeVoice] = useState(false);
 
   useEffect(() => {
@@ -814,6 +826,8 @@ export default function AutomationControlCenter(props: Props) {
       motionEnabled: config.motionEnabled,
       motionStyle: config.motionStyle,
       motionIntensity: config.motionIntensity,
+      overviewZoomEnabled: config.overviewZoomEnabled,
+      overviewZoomGroupSize: config.overviewZoomGroupSize,
       subtitleEnabled: config.subtitleEnabled,
       subtitleStyle: config.subtitleStyle,
       subtitlePosition: config.subtitlePosition,
@@ -2190,7 +2204,10 @@ export default function AutomationControlCenter(props: Props) {
               </span>
             </button>
           </div>
-        </div>
+          <div className="mt-3 rounded-xl border border-violet-200 bg-white p-3">
+            <Toggle checked={config.overviewZoomEnabled} onChange={(value) => update("overviewZoomEnabled", value)} label="Ảnh tổng quan chương → zoom chi tiết" />
+            <p className="mt-1 text-[10px] leading-relaxed text-violet-700">Nhận diện các câu như Phần 1, Bước 1, Cấp độ 1, Kiểu 1… ở bất kỳ vị trí nào. Mỗi lần voice đọc một mục, bảng tổng quan hiện đầy đủ rồi zoom đúng ô đó. Không có chuỗi mục đánh số rõ ràng thì tự bỏ qua.</p>
+          </div>        </div>
       )}
 
       <div className="relative z-10 flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center">
@@ -3923,11 +3940,11 @@ export default function AutomationControlCenter(props: Props) {
                 Giọng đọc hoặc voice đã tạo sẵn
               </h3>
               <p className="mt-1 text-[11px] text-slate-500">
-                Dùng giọng Premium của tool, hoặc lấy đúng kịch bản đã chốt để
-                tạo voice bên ngoài rồi tải file về đây.
+                Dùng VieNeu offline, giọng Premium của tool, hoặc tải file
+                voice đã tạo sẵn.
               </p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
               <div
                 className={`rounded-2xl border p-4 text-left transition ${config.voiceProvider === "external" ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100" : "border-slate-200 bg-white"}`}
               >
@@ -3977,6 +3994,20 @@ export default function AutomationControlCenter(props: Props) {
                   </div>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => setVieneuLibraryOpen(true)}
+                className={`rounded-2xl border p-4 text-left transition ${config.voiceProvider === "vieneu" ? "border-sky-500 bg-sky-50 ring-2 ring-sky-100" : "border-slate-200 bg-white"}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-black text-slate-800">VieNeu Local</span>
+                  <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-black text-sky-700">OFFLINE · 48 KHZ</span>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                  Giọng Việt chất lượng cao, chạy ONNX trên CPU và không cần API key. Lần đầu tool sẽ tự tải model.
+                </p>
+                <span className="mt-3 inline-block rounded-lg bg-sky-600 px-3 py-2 text-[11px] font-black text-white">Mở thư viện VieNeu</span>
+              </button>
               <div
                 className={`rounded-2xl border p-4 text-left transition ${config.voiceProvider === "premium" ? "border-violet-500 bg-violet-50 ring-2 ring-violet-100" : "border-slate-200 bg-white"}`}
               >
@@ -4031,23 +4062,36 @@ export default function AutomationControlCenter(props: Props) {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Giọng đọc">
                   <Select
-                    value={config.voiceModel || props.selectedVoice || "Zephyr"}
+                    value={config.voiceModel || (config.voiceProvider === "vieneu" ? "Minh Đức" : props.selectedVoice || "Zephyr")}
                     onChange={(e) => {
                       update("voiceModel", e.target.value);
                       props.setSelectedVoice(e.target.value);
                     }}
                   >
-                    {config.voiceModel && (
+                    {config.voiceProvider === "vieneu" ? (
+                      <>
+                        {config.voiceReferencePath && <option value={config.voiceModel}>{config.voiceModel}</option>}
+                        <option value="Minh Đức">Minh Đức · nam</option>
+                        <option value="Phạm Tuyên">Phạm Tuyên · nam Bắc</option>
+                        <option value="Thái Sơn">Thái Sơn · nam</option>
+                        <option value="Xuân Vĩnh">Xuân Vĩnh · nam</option>
+                        <option value="Thanh Bình">Thanh Bình · nam</option>
+                        <option value="Trúc Ly">Trúc Ly · nữ</option>
+                        <option value="Ngọc Linh">Ngọc Linh · nữ</option>
+                        <option value="Đoan Trang">Đoan Trang · nữ</option>
+                        <option value="Mai Anh">Mai Anh · nữ</option>
+                        <option value="Thục Đoan">Thục Đoan · nữ</option>
+                        <option value="Minh Triết">Minh Triết · nam</option>
+                        <option value="Thùy Dung">Thùy Dung · nữ</option>
+                        <option value="Quang Sơn">Quang Sơn · nam</option>
+                        <option value="Ngọc Trân">Ngọc Trân · nữ</option>
+                      </>
+                    ) : config.voiceModel && (
                       <option value={config.voiceModel}>
                         {config.voiceModel} — giọng Premium đã chọn
                       </option>
                     )}
-                    <option value="Zephyr">Zephyr</option>
-                    <option value="Puck">Puck</option>
-                    <option value="Charon">Charon</option>
-                    <option value="Kore">Kore</option>
-                    <option value="Fenrir">Fenrir</option>
-                    <option value="Aoede">Aoede</option>
+                    {config.voiceProvider !== "vieneu" && <><option value="Zephyr">Zephyr</option><option value="Puck">Puck</option><option value="Charon">Charon</option><option value="Kore">Kore</option><option value="Fenrir">Fenrir</option><option value="Aoede">Aoede</option></>}
                   </Select>
                 </Field>
                 <Field label="Tốc độ">
@@ -4098,6 +4142,22 @@ export default function AutomationControlCenter(props: Props) {
             update("voiceModel", voice.name);
             props.setSelectedVoice(voice.name);
             setVoiceLibraryOpen(false);
+          }}
+        />
+        <VieNeuVoiceLibrary
+          isOpen={vieneuLibraryOpen}
+          onClose={() => setVieneuLibraryOpen(false)}
+          selectedVoice={config.voiceModel}
+          selectedLanguage={config.voiceLanguage}
+          referenceName={config.voiceReferenceName}
+          onSelect={(selection) => {
+            update("voiceProvider", "vieneu");
+            update("voiceModel", selection.voice);
+            update("voiceLanguage", selection.language);
+            update("voiceReferencePath", selection.referenceAudioPath || "");
+            update("voiceReferenceName", selection.referenceName || "");
+            props.setSelectedVoice(selection.voice);
+            setVieneuLibraryOpen(false);
           }}
         />
 
@@ -4220,7 +4280,7 @@ export default function AutomationControlCenter(props: Props) {
                   <option value="diagonal_tl_to_br">Pan chéo</option>
                 </Select>
               </Field>
-              <Field label="Tốc độ hiệu ứng">
+                            <Field label="Tốc độ hiệu ứng">
                 <Select
                   value={config.motionIntensity}
                   onChange={(e) => update("motionIntensity", e.target.value)}

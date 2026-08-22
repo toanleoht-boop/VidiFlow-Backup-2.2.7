@@ -269,10 +269,12 @@ function isReferenceUploadFailure(message: string): boolean {
   );
 }
 
-async function tryAttachExistingFlowReference(page: Page, fileName: string): Promise<boolean> {
-  const attachBtn = page.locator('button[aria-haspopup="dialog"]').filter({
-    has: page.locator('i').filter({ hasText: /add_2|add/ }),
-  }).first();
+async function tryAttachExistingFlowReference(page: Page, fileName: string, startFrame = false): Promise<boolean> {
+  const attachBtn = startFrame
+    ? page.locator('[type="button"][aria-haspopup="dialog"]').filter({ hasText: /^Bắt đầu$|^Start$/i }).first()
+    : page.locator('button[aria-haspopup="dialog"]').filter({
+        has: page.locator('i').filter({ hasText: /add_2|add/ }),
+      }).first();
   if (!await attachBtn.isVisible().catch(() => false)) return false;
 
   try {
@@ -325,7 +327,7 @@ async function tryAttachExistingFlowReference(page: Page, fileName: string): Pro
   return false;
 }
 
-async function uploadReferenceImage(page: Page, base64OrPath: string, platform: 'gemini' | 'labs') {
+async function uploadReferenceImage(page: Page, base64OrPath: string, platform: 'gemini' | 'labs', startFrame = false) {
   if (!base64OrPath) return;
 
   appLog(`[Playwright] Uploading reference image natively on ${platform}...`);
@@ -397,7 +399,7 @@ async function uploadReferenceImage(page: Page, base64OrPath: string, platform: 
             await page.waitForTimeout(2000);
         }
     } else {
-        if (await tryAttachExistingFlowReference(page, referenceFileName)) return;
+        if (await tryAttachExistingFlowReference(page, referenceFileName, startFrame)) return;
 
         let isUploadClicked = false;
         // Flow's documented control is labelled "Tải nội dung nghe nhìn lên".
@@ -406,7 +408,9 @@ async function uploadReferenceImage(page: Page, base64OrPath: string, platform: 
         let fileChooserPromise = page.waitForEvent('filechooser', { timeout: 15000 }).catch(() => null);
         
         // Exact locator for attach button (+) from HTML: icon hasText: add_2
-         const attachBtn = page.locator('button[aria-haspopup="dialog"]').filter({ has: page.locator('i').filter({ hasText: /add_2|add/ }) }).first();
+         const attachBtn = startFrame
+           ? page.locator('[type="button"][aria-haspopup="dialog"]').filter({ hasText: /^Bắt đầu$|^Start$/i }).first()
+           : page.locator('button[aria-haspopup="dialog"]').filter({ has: page.locator('i').filter({ hasText: /add_2|add/ }) }).first();
 
          // Follow the Flow picker sequence from the supplied HTML exactly:
          // open add_2 -> upload in the dialog -> select its card -> Add to
@@ -443,7 +447,7 @@ async function uploadReferenceImage(page: Page, base64OrPath: string, platform: 
            }
 
            const uploadedFilesTab = activePicker.locator('button[role="tab"]').filter({
-             hasText: /Tá»‡p táº£i lÃªn|Uploaded files/i,
+             hasText: /Tệp tải lên|Uploaded files/i,
            }).first();
            if (await uploadedFilesTab.isVisible().catch(() => false)) {
              await uploadedFilesTab.click({ force: true });
@@ -963,17 +967,31 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
               if (await typeTab.isVisible()) {
                 await typeTab.click();
                 await getPlaywrightPage()!.waitForTimeout(500);
+                if (await typeTab.getAttribute('aria-selected') !== 'true') {
+                  throw new Error(isVideo ? 'Flow did not select Video mode.' : 'Flow did not select Image mode.');
+                }
               }
 
-              // A reference image for video is a character/object component,
-              // not a first-frame instruction.  Select Flow's "Thành phần"
-              // mode explicitly so the uploaded image governs the subject in
-              // the generated clip.
-              if (isVideo && options.referenceImage) {
-                const referenceModeTab = flowTabs.filter({ hasText: /Thành phần|Components|Ingredients/i }).last();
-                if (await referenceModeTab.isVisible()) {
-                  await referenceModeTab.click();
-                  await getPlaywrightPage()!.waitForTimeout(300);
+              // Media Only supplies autoStartImage: use it as Flow's opening
+              // Start frame. Existing character/profile references keep the
+              // original Components behavior used by the other workflows.
+              if (isVideo && (visualConfig?.autoStartImage || options.referenceImage)) {
+                const referenceModeTab = flowTabs.filter({
+                  hasText: visualConfig?.autoStartImage
+                    ? /Khung hình|Frames/i
+                    : /Thành phần|Components|Ingredients/i,
+                }).last();
+                if (!await referenceModeTab.isVisible()) {
+                  throw new Error(visualConfig?.autoStartImage
+                    ? 'Flow Frame mode is not available.'
+                    : 'Flow Components mode is not available.');
+                }
+                await referenceModeTab.click();
+                await getPlaywrightPage()!.waitForTimeout(300);
+                if (await referenceModeTab.getAttribute('aria-selected') !== 'true') {
+                  throw new Error(visualConfig?.autoStartImage
+                    ? 'Flow did not select Frame mode.'
+                    : 'Flow did not select Components mode.');
                 }
               }
 
@@ -1132,7 +1150,12 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
         // library upload and it is ignored by the generation request.
         const activeReferenceImages = referenceImagesForGeneration(options);
         for (const referenceImage of activeReferenceImages) {
-          await uploadReferenceImage(getPlaywrightPage()!, referenceImage, 'labs');
+          await uploadReferenceImage(
+            getPlaywrightPage()!,
+            referenceImage,
+            'labs',
+            Boolean(visualConfig?.autoStartImage),
+          );
         }
 
         // Flow leaves its media-settings popover open after a configuration
@@ -1994,6 +2017,11 @@ function referencesForPrompt(prompt: string, visualConfig: any): string[] {
 }
 
 function referenceImagesForGeneration(options: ImageGeneratorOptions): string[] {
+  const autoStartImage = String(options.visualConfig?.autoStartImage || "").trim();
+  if (autoStartImage) {
+    appLog("[Reference] Using the current task autoStartImage as the only Start-frame upload.");
+    return [autoStartImage];
+  }
   const characterReferences = referencesForPrompt(options.prompt, options.visualConfig);
   if (characterReferences.length) {
     appLog(`[Reference] Scene matched ${characterReferences.length} character reference attachment(s).`);
@@ -3111,6 +3139,26 @@ async function generateImageWithViettheoAPIOnce(options: ImageGeneratorOptions):
   throw new Error(`VietTheo không hoàn tất job ${jobId} trong ${Math.round(maxJobDurationMs / 60000)} phút. Sẽ tạo lại job mới thay vì tiếp tục treo.`);
 }
 
+function isFlow2PolicyRefusal(message: string): boolean {
+  return /(content\s*policy|safety\s*(filter|policy)|violat(?:es?|ion)|refused\s+to\s+create|blocked|prohibited|unsafe|policy\s*violation|nội\s*dung\s*bị\s*từ\s*chối)/i.test(String(message || ""));
+}
+
+// One conservative non-graphic rewrite after a provider policy refusal.
+// It keeps the subject/composition and never disables provider safety.
+function sanitizePolicySensitivePrompt(prompt: string): string {
+  let safe = String(prompt || "");
+  const replacements: Array<[RegExp, string]> = [
+    [/\b(blood|bloody|gore|gory|dismember(?:ed|ment)?|mutilat(?:ed|ion)|corpse|dead\s+body|decapitat(?:ed|ion)|graphic\s+(?:wound|injury|violence))\b/gi, "non-graphic aftermath with dramatic red lighting"],
+    [/\b(wound|injur(?:y|ies)|bleeding|severed|burned\s+body|torture|brutal(?:ity)?)\b/gi, "non-graphic signs of struggle"],
+    [/\b(gun|rifle|pistol|firearm|knife|sword|weapon|ammunition|shoot(?:ing|out)|stab(?:bed|bing)?)\b/gi, "symbolic prop kept safely lowered and non-threatening"],
+    [/\b(explosion|explosive|detonation|bomb|missile|warzone|battlefield|terror(?:ist|ism)?)\b/gi, "abstract burst of light and distant atmospheric tension"],
+    [/\b(suicide|self[- ]harm|sexual(?:ized)?|nudity|nude|explicit)\b/gi, "serious but family-safe emotional expression"],
+    [/\b(kill(?:ed|ing)?|murder(?:ed|er)?|assassinat(?:e|ed|ion))\b/gi, "a tense non-violent confrontation"],
+  ];
+  for (const [pattern, replacement] of replacements) safe = safe.replace(pattern, replacement);
+  if (!/Safe educational depiction:/i.test(safe)) safe += " Safe educational depiction: non-graphic, no blood, no injury detail, no threatening weapons, no sexual content, no self-harm, family-safe visual storytelling.";
+  return safe.replace(/\s{2,}/g, " ").trim();
+}
 function isNonRetryableMediaGenerationError(message: string): boolean {
   // Retry every provider/browser/generation failure, including policy,
   // CAPTCHA, invalid prompt and temporary authentication failures. Only an
@@ -3128,13 +3176,25 @@ function isNonRetryableMediaGenerationError(message: string): boolean {
 export async function generateImageWithViettheoAPI(options: ImageGeneratorOptions): Promise<ImageGeneratorResult> {
   let lastError: any = null;
   const maxAttempts = Math.min(3, Math.max(1, Math.floor(Number(options.maxAttempts) || 3)));
+  let policyRepairUsed = false;
+  let requestOptions = options;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       appLog(`[Viettheo API] Bắt đầu lần tạo ${attempt}/${maxAttempts}.`);
-      return await generateImageWithViettheoAPIOnce(options);
+      return await generateImageWithViettheoAPIOnce(requestOptions);
     } catch (error: any) {
       lastError = error;
       const message = String(error?.message || error || 'VietTheo API failed.');
+      if (isFlow2PolicyRefusal(message) && !policyRepairUsed && !isBatchCancelled) {
+        const repairedPrompt = sanitizePolicySensitivePrompt(requestOptions.prompt);
+        if (repairedPrompt !== String(requestOptions.prompt || "")) {
+          policyRepairUsed = true;
+          requestOptions = { ...requestOptions, prompt: repairedPrompt };
+          appLog("[Viettheo API] Flow2 từ chối policy; đã tự chuyển prompt sang bản an toàn và thử lại một lần.");
+          attempt -= 1;
+          continue;
+        }
+      }
       if (isBatchCancelled || isNonRetryableMediaGenerationError(message) || attempt >= maxAttempts) {
         if (/resource[_\s]+(?:has[_\s]+been[_\s]+)?exhausted/i.test(message)) {
           throw new Error(
