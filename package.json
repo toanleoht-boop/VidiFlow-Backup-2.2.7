@@ -1,13 +1,16 @@
 {
   "name": "ai-youtube-video-generator",
   "private": true,
-  "version": "2.2.7",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "qa:presets": "node --import tsx scripts/qa_presets.mjs",
     "preview": "vite preview",
+    "test": "node --import tsx --test tests/localRequestSecurity.test.ts",
+    "check": "npm run lint && npm test && npm run qa:presets",
+    "release:preflight": "powershell -NoProfile -ExecutionPolicy Bypass -File packaging/release_preflight.ps1",
     "clean": "rm -rf dist server.js",
     "start": "node dist/server.cjs",
     "lint": "tsc --noEmit"
@@ -49,6 +52,7 @@
   },
   "overrides": {
     "body-parser": "1.20.6",
+    "brace-expansion": "1.1.18",
     "postcss": "8.5.24",
     "protobufjs": "7.6.5"
   }

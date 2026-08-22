@@ -147,6 +147,14 @@ const normalizeFacebookPageUrl = (raw: string) => {
     return "";
   }
 };
+const detectScheduledInputType = (raw: string): "link" | "idea" | "script" => {
+  const value = raw.trim();
+  if (/^https?:\/\/\S+$/i.test(value)) return "link";
+  const wordCount = value.split(/\s+/).filter(Boolean).length;
+  const looksStructured = /(^|\n)\s*(?:scene|part|chapter|level|step|c\u1ea3nh|ph\u1ea7n|ch\u01b0\u01a1ng|c\u1ea5p\s*\u0111\u1ed9|b\u01b0\u1edbc)\s*\d+/i.test(value);
+  const sentenceCount = (value.match(/[.!?](?:\s|$)/g) || []).length;
+  return wordCount >= 80 || looksStructured || sentenceCount >= 6 ? "script" : "idea";
+};
 const normalizeYouTubeChannelId = (raw: string) => {
   const value = raw.trim();
   const match = value.match(/(?:studio\.youtube\.com\/channel\/|youtube\.com\/channel\/)?([A-Za-z0-9_-]{12,})/i);
@@ -1478,6 +1486,7 @@ export default function TelegramAutomationScheduler({
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[.18em] text-violet-100">Tổng quan Preset</p>
                 <h3 className="mt-1 text-xl font-black">{previewPreset.name}</h3>
+                <span className={selectedPreset === previewPreset.id ? "mt-2 inline-flex rounded-full bg-emerald-400/20 px-2.5 py-1 text-[9px] font-black text-emerald-100" : "mt-2 inline-flex rounded-full bg-white/15 px-2.5 py-1 text-[9px] font-black text-white"}>{selectedPreset === previewPreset.id ? "\u0110ANG \u00c1P D\u1ee4NG" : "CH\u1ec8 XEM TR\u01af\u1edaC \u00b7 CH\u01afA \u00c1P D\u1ee4NG"}</span>
                 <p className="mt-1 text-xs text-violet-100">{previewPreset.description || "Preset sản xuất video"}</p>
               </div>
               <button
@@ -1514,6 +1523,14 @@ export default function TelegramAutomationScheduler({
                 </section>
               )}
               <div className="mt-5 flex justify-end gap-2">
+                {selectedPreset !== previewPreset.id && (
+                  <button type="button" onClick={() => {
+                    setSelectedPreset(previewPreset.id);
+                    setPreviewPreset(null);
+                  }} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-700">
+                    {"\u00c1p d\u1ee5ng preset n\u00e0y"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1662,6 +1679,7 @@ export default function TelegramAutomationScheduler({
           <div className="mt-4 space-y-2">
             {presets.map((preset) => {
               const cfg = preset.config?.autoConfig || preset.config || {};
+              const isApplied = selectedPreset === preset.id;
               return (
                 <div
                   key={preset.id}
@@ -1674,11 +1692,14 @@ export default function TelegramAutomationScheduler({
                       setPreviewPreset(preset);
                     }
                   }}
-                  className={`cursor-pointer rounded-xl border p-3 transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md ${editingPresetId === preset.id ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-slate-50"}`}
+                  className={`cursor-pointer rounded-xl border p-3 transition hover:-translate-y-0.5 hover:shadow-md ${isApplied ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100" : editingPresetId === preset.id ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-slate-50 hover:border-violet-300"}`}
                 >
                   <div className="flex gap-2">
                     <div className="min-w-0 flex-1">
-                      <b className="text-sm">{preset.name}</b>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <b className="text-sm">{preset.name}</b>
+                        <span className={isApplied ? "rounded-full bg-emerald-600 px-2 py-0.5 text-[8px] font-black text-white" : "rounded-full bg-slate-200 px-2 py-0.5 text-[8px] font-black text-slate-500"}>{isApplied ? "\u0110ANG \u00c1P D\u1ee4NG" : "CH\u1ec8 XEM"}</span>
+                      </div>
                       <p className="text-[11px] text-slate-500">
                         {preset.description || "Preset sản xuất video"}
                       </p>
@@ -1779,11 +1800,18 @@ export default function TelegramAutomationScheduler({
           </select>
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const nextInput = e.target.value;
+              setInput(nextInput);
+              if (nextInput.trim()) setInputType(detectScheduledInputType(nextInput));
+            }}
             rows={5}
             placeholder="Nhập link, mô tả hoặc kịch bản..."
             className="mt-3 w-full rounded-xl border p-3 text-sm"
           />
+          <p className="mt-1.5 text-[10px] font-semibold text-violet-600">
+            {"\u0110\u00e3 nh\u1eadn d\u1ea1ng: "}{inputType === "link" ? "Link video" : inputType === "script" ? "K\u1ecbch b\u1ea3n ho\u00e0n ch\u1ec9nh" : "M\u00f4 t\u1ea3 / \u00fd t\u01b0\u1edfng"}.
+          </p>
           <div className="mt-3 rounded-2xl border border-violet-200 bg-violet-50/60 p-3">
             <label className="text-xs font-black text-slate-700">
               Thư mục lưu dự án lên lịch

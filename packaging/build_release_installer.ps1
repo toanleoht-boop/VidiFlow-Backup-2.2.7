@@ -1,5 +1,6 @@
 param(
-  [string]$Version = ""
+  [string]$Version = "",
+  [switch]$RequireSignature
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,9 +45,11 @@ try {
   Copy-Item (Join-Path $root 'packaging\runtime\whisper\ggml-base.bin') (Join-Path $whisperDir 'ggml-base.bin') -Force
   @{ version = $Version; built_at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $app 'version.json') -Encoding utf8
 
-  & $iscc "/DAppVersion=$Version" "/DSourceDir=$launcherDist" (Join-Path $PSScriptRoot 'vidiflow-installer.iss')
+  & $iscc "/DAppVersion=$Version" "/DSourceDir=$launcherDist" "/DOutputSuffix=-legacy-nuitka" (Join-Path $PSScriptRoot 'vidiflow-installer.iss')
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup exited with code $LASTEXITCODE" }
-  Write-Host "Installer completed: $(Join-Path $root "release\VidiFlow-Setup-$Version.exe")"
+  $installerPath = Join-Path $root "release\VidiFlow-Setup-$Version-legacy-nuitka.exe"
+  & "$PSScriptRoot\write_release_manifest.ps1" -ArtifactPath $installerPath -Version $Version -Channel legacy-nuitka -RequireSignature:$RequireSignature
+  Write-Host "Legacy Nuitka installer completed: $installerPath"
 } finally {
   Pop-Location
 }

@@ -1,4 +1,7 @@
-param([string]$Version = '')
+param(
+  [string]$Version = '',
+  [switch]$RequireSignature
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $Version) { $Version = (Get-Content (Join-Path $root 'version.json') -Raw | ConvertFrom-Json).version }
@@ -129,6 +132,9 @@ Copy-Item "$root\public\brand" "$stage\brand" -Recurse -Force
   Assert-NoBrowserProfiles "$desktopDir\resources\app"
   & $iscc "/DAppVersion=$Version" "/DSourceDir=$desktopDir" "$root\packaging\vidiflow-installer.iss"
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+  $installerPath = "$root\release\VidiFlow-Setup-$Version.exe"
+  & "$PSScriptRoot\write_release_manifest.ps1" -ArtifactPath $installerPath -Version $Version -Channel stable -RequireSignature:$RequireSignature
+  if ($LASTEXITCODE -ne 0) { throw "Release manifest failed: $LASTEXITCODE" }
   Write-Host "Desktop app created: $desktopDir"
-  Write-Host "Automatic-update installer created: $root\release\VidiFlow-Setup-$Version.exe"
+  Write-Host "Automatic-update installer created: $installerPath"
 } finally { Pop-Location }

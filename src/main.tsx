@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode, StrictMode, useEffect, useState } from 'react';
+import React, { Component, ErrorInfo, ReactNode, StrictMode, Suspense, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
@@ -99,7 +99,9 @@ class ErrorBoundary extends Component<Props, State> {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-950 text-white"><div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-5 text-center shadow-2xl"><div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-violet-300 border-t-transparent"/><p className="mt-3 text-sm font-black">{"\u0110ang m\u1edf t\u00ednh n\u0103ng\u2026"}</p><p className="mt-1 text-xs text-slate-400">{"D\u1eef li\u1ec7u d\u1ef1 \u00e1n c\u1ee7a b\u1ea1n v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef nguy\u00ean."}</p></div></div>}>
+        <App />
+      </Suspense>
       <VidiFlowDialogCenter />
     </ErrorBoundary>
   </StrictMode>,

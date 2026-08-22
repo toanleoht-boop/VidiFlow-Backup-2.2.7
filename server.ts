@@ -11,6 +11,12 @@ import pipelineController from "./src/server/controllers/pipelineController.js";
 import { getPlaywrightPage, initPlaywright } from "./src/server/services/audioService.js";
 import { setViettheoGatewayHandler } from "./src/server/services/imageGeneratorService.js";
 import { createAutomationSchedulerRouter } from "./src/server/routes/automationSchedulerRoutes.js";
+import {
+  isSupportedImageContent,
+  LOCAL_SECURITY_HEADERS,
+  resolveAllowedLocalMediaPath,
+  validateLocalRequest,
+} from "./src/server/security/localRequestSecurity.js";
 
 // Secrets must live outside the installed application directory. The desktop
 // updater replaces that directory, which previously made customer API keys
@@ -120,7 +126,7 @@ const readInstalledAppVersion = () => {
       if (version) return version;
     } catch {}
   }
-  return "2.2.7";
+  return "2.3.0";
 };
 const APP_VERSION = readInstalledAppVersion();
 // Always prefer the FFmpeg binary bundled with the app.  Requiring a separate
@@ -306,6 +312,26 @@ async function cleanGeneratedMedia(filePath: string, mediaType: "image" | "video
   return { path: filePath, backupPath, cleaned: true, log: result.stdout.trim() };
 }
 
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  for (const [header, value] of Object.entries(LOCAL_SECURITY_HEADERS)) {
+    res.setHeader(header, value);
+  }
+  const decision = validateLocalRequest({
+    host: req.get("host"),
+    origin: req.get("origin"),
+    fetchSite: req.get("sec-fetch-site"),
+  });
+  if ("code" in decision) {
+    return res.status(403).json({
+      success: false,
+      code: decision.code,
+      error: "Yêu cầu không đến từ giao diện VidiFlow trên máy này.",
+    });
+  }
+  return next();
+});
+
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
@@ -346,13 +372,13 @@ const normalizeAutomationConfig = (config: any) => {
     ? { ...config }
     : {};
   // Older installations stored the former default of one worker. API Flow is
-  // designed for five concurrent jobs, while deliberate values 2-5 remain
+  // designed for seven concurrent jobs, while deliberate values 2-7 remain
   // editable and are preserved.
   if (
     normalized.generationMode === "viettheo-api" &&
     (!Number.isFinite(Number(normalized.chromeThreads)) || Number(normalized.chromeThreads) <= 1)
   ) {
-    normalized.chromeThreads = 5;
+    normalized.chromeThreads = 7;
   }
   // Migrate the former centered-subtitle default exactly once. Keeping a
   // version flag lets users deliberately choose middle/top afterwards.
@@ -7660,6 +7686,14 @@ app.post("/api/project-output-summary", (req, res) => {
       .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
     const scriptCandidates = ["step3_dialogues.txt", "script.txt", "raw_script.txt"].map(file => path.join(root, file));
     const scriptPath = scriptCandidates.find(file => fs.existsSync(file)) || "";
+    const timelinePath = path.join(root, "step3_dialogues.txt");
+    const portableBackupPath = path.join(root, "script.txt");
+    const timelineText = fs.existsSync(timelinePath) ? fs.readFileSync(timelinePath, "utf8") : "";
+    const portableBackupText = fs.existsSync(portableBackupPath) ? fs.readFileSync(portableBackupPath, "utf8") : "";
+    const expectedMediaFromTimeline = (timelineText.match(/^--- Scene\s+\d+/gim) || []).length;
+    const expectedMediaFromBackup = (portableBackupText.match(/^\s*\+\s+\[[^\]]+\]/gm) || []).length;
+    const expectedMediaCount = Math.max(expectedMediaFromTimeline, expectedMediaFromBackup);
+    const hasStoryboard = expectedMediaCount > 0;
     const originalVoice = ["voice_original.mp3", "voice_original.wav"].map(file => path.join(root, file)).find(file => fs.existsSync(file)) || "";
     const thumbnailCandidates = filesIn(root, /^thumbnail_.*\.(?:png|jpe?g|webp)$/i)
       .map(file => ({ file, fullPath: path.join(root, file), stat: fs.statSync(path.join(root, file)) }))
@@ -7679,12 +7713,28 @@ app.post("/api/project-output-summary", (req, res) => {
     // Voice cuts are optional: rendering uses the continuous original voice
     // to avoid audible gaps.  Output progress therefore tracks deliverables,
     // not the optional Whisper alignment cache.
-    const completedChecks = [!!scriptPath, images.length > 0 || videos.length > 0, !!originalVoice, fs.existsSync(seoPath), thumbnailCandidates.length > 0, finalVideos.length > 0];
+    const completedMediaCount = images.length + videos.length;
+    // Keep this percentage on the same milestone scale as Auto Pipeline.
+    // The previous equal-weight formula reported 17% after script/storyboard
+    // even while the running task correctly showed about 40-74%.
+    let durableProgress = 0;
+    if (scriptPath) durableProgress = Math.max(durableProgress, 35);
+    if (originalVoice) durableProgress = Math.max(durableProgress, 72);
+    if (hasStoryboard) durableProgress = Math.max(durableProgress, 74);
+    if (completedMediaCount > 0) {
+      const mediaRatio = expectedMediaCount > 0
+        ? Math.min(1, completedMediaCount / expectedMediaCount)
+        : 1;
+      durableProgress = Math.max(durableProgress, 74 + Math.round(mediaRatio * 10));
+    }
+    if (fs.existsSync(seoPath)) durableProgress = Math.max(durableProgress, 90);
+    if (thumbnailCandidates.length > 0) durableProgress = Math.max(durableProgress, 95);
+    if (finalVideos.length > 0) durableProgress = 100;
     res.json({
       success: true,
-      progress: Math.round(completedChecks.filter(Boolean).length / completedChecks.length * 100),
+      progress: durableProgress,
       script: { ready: !!scriptPath, path: scriptPath, size: scriptPath ? fs.statSync(scriptPath).size : 0 },
-      media: { ready: images.length > 0 || videos.length > 0, imageCount: images.length, videoCount: videos.length, previewImage, previewVideo },
+      media: { ready: completedMediaCount > 0, imageCount: images.length, videoCount: videos.length, expectedCount: expectedMediaCount, previewImage, previewVideo },
       voice: { ready: !!originalVoice, originalPath: originalVoice, cutCount: Math.max(cutVoices.length, manifestCutCount) },
       seo: { ready: fs.existsSync(seoPath), path: seoPath, title: seoTitle },
       thumbnail: thumbnailCandidates.length ? { ready: true, path: thumbnailCandidates[0].fullPath, name: thumbnailCandidates[0].file } : { ready: false },
@@ -7748,7 +7798,8 @@ app.post("/api/list-project-media", (req, res) => {
 // ==========================================
 // NATIVE DIALOG PICKER & SERVE LOCAL FILES
 // ==========================================
-app.post("/api/upload-reference-image-file", express.raw({ type: ["image/png", "image/jpeg", "image/webp"], limit: Number.MAX_SAFE_INTEGER }), (req, res) => {
+const referenceImageUploadLimit = 25 * 1024 * 1024;
+app.post("/api/upload-reference-image-file", express.raw({ type: ["image/png", "image/jpeg", "image/webp"], limit: referenceImageUploadLimit }), (req, res) => {
   try {
     const fileName = String(req.query.fileName || "reference.png");
     const projectDir = String(req.query.projectDir || "");
@@ -7756,6 +7807,8 @@ app.post("/api/upload-reference-image-file", express.raw({ type: ["image/png", "
     if (!["image/png", "image/jpeg", "image/webp"].includes(mime)) return res.status(400).json({ success: false, error: "Ảnh phải là PNG, JPG hoặc WebP." });
     const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     if (!buffer.length) return res.status(400).json({ success: false, error: "File ảnh tham chiếu đang trống." });
+    if (buffer.length > referenceImageUploadLimit) return res.status(413).json({ success: false, error: "Ảnh tham chiếu phải nhỏ hơn 25 MB." });
+    if (!isSupportedImageContent(mime, buffer)) return res.status(400).json({ success: false, error: "Nội dung file không đúng định dạng ảnh đã chọn." });
     const root = projectDir ? resolveCompatibleProjectPath(projectDir) : path.join(process.cwd(), "data", "reference-images");
     const targetDir = path.join(root, "references");
     fs.mkdirSync(targetDir, { recursive: true });
@@ -7838,13 +7891,22 @@ app.get("/api/serve-local-file", (req, res) => {
     if (!rawPath || typeof rawPath !== 'string') {
       return res.status(400).send("Missing path");
     }
-    const filePath = resolveCompatibleProjectPath(rawPath);
-    if (!fs.existsSync(filePath)) {
+    const filePath = resolveAllowedLocalMediaPath(
+      resolveCompatibleProjectPath(rawPath),
+    );
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
       return res.status(404).send("File not found");
     }
+    res.setHeader("Cache-Control", "private, max-age=300");
     res.sendFile(filePath);
   } catch (err: any) {
-    res.status(500).send(err.message);
+    if (err?.message === "LOCAL_MEDIA_TYPE_NOT_ALLOWED" || err?.message === "LOCAL_MEDIA_PATH_INVALID") {
+      return res.status(403).json({
+        success: false,
+        error: "LOCAL_MEDIA_ACCESS_DENIED",
+      });
+    }
+    res.status(500).json({ success: false, error: "LOCAL_MEDIA_READ_FAILED" });
   }
 });
 app.get("/api/dialog/pick", (req, res) => {
@@ -8064,6 +8126,16 @@ app.post("/api/timeline/ultra-process", (req, res) => {
 
 // Setup Vite Dev Server / Static files middleware
 async function startServer() {
+  const payloadErrorHandler: express.ErrorRequestHandler = (error, _req, res, next) => {
+    if (error?.type !== "entity.too.large") return next(error);
+    return res.status(413).json({
+      success: false,
+      code: "PAYLOAD_TOO_LARGE",
+      error: "Tệp hoặc nội dung tải lên vượt quá giới hạn an toàn.",
+    });
+  };
+  app.use(payloadErrorHandler);
+
   // All API handlers are registered above this point. Return a real JSON 404
   // for unknown API paths before Vite/the SPA fallback can turn them into an
   // HTML 200 response (which otherwise causes `Unexpected token <` in fetch).

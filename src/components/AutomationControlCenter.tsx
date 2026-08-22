@@ -2030,6 +2030,7 @@ export default function AutomationControlCenter(props: Props) {
           <div className="flex gap-2 overflow-x-auto pb-1">
             {workflowSteps.map((step) => {
               const active = workspaceMode === "setup" && workflowStep === step.id;
+              const locked = Boolean(props.twoStage && step.id > manualStage);
               const failed =
                 active &&
                 props.logs.some((line) =>
@@ -2040,7 +2041,8 @@ export default function AutomationControlCenter(props: Props) {
                   type="button"
                   key={step.id}
                   onClick={() => goToWorkflowStep(step.id)}
-                  disabled={props.twoStage && step.id > manualStage}
+                  disabled={locked}
+                  title={locked ? `Ho\u00e0n t\u1ea5t B\u01b0\u1edbc ${step.id - 1} \u0111\u1ec3 m\u1edf B\u01b0\u1edbc ${step.id}` : `M\u1edf B\u01b0\u1edbc ${step.id}: ${step.label}`}
                   className={`group min-w-[170px] flex-1 rounded-xl border px-3 py-2.5 text-left transition ${
                     active
                       ? "border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200"
@@ -2068,6 +2070,9 @@ export default function AutomationControlCenter(props: Props) {
                       <span className="block whitespace-nowrap text-[11px] font-black">
                         {step.label}
                       </span>
+                      {locked && (
+                        <span className="mt-0.5 block text-[8px] font-bold opacity-70">{"Kh\u00f3a \u00b7 ho\u00e0n t\u1ea5t b\u01b0\u1edbc tr\u01b0\u1edbc"}</span>
+                      )}
                     </span>
                   </span>
                 </button>

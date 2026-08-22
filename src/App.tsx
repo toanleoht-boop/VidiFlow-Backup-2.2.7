@@ -40,9 +40,7 @@ import {
   Moon
 } from "lucide-react";
 import { BrainstormResult, Storyboard, SEOResults, ProductionProgress } from "./types";
-import PromptTemplatesHub from "./components/PromptTemplatesHub";
-import WorkflowGuideView from "./components/WorkflowGuideView";
-import CapCutSynchronizer from "./components/CapCutSynchronizer";
+import type { AutomationPreset } from "./components/PresetAutomationHub";
 
 type CharacterProfile = {
   id: string;
@@ -72,18 +70,25 @@ const buildCharacterBible = (profiles: CharacterProfile[]): string => {
   ].join("\n");
 };
 import { vidiflowAlert, vidiflowConfirm } from "./components/VidiFlowDialogCenter";
-import DetailedReportView from "./components/DetailedReportView";
-import AI33VoiceStudio from "./components/AI33VoiceStudio";
-import AudioTimelinePro from "./components/AudioTimelinePro";
-import AutomationControlCenter from "./components/AutomationControlCenter";
-import PresetAutomationHub, { AutomationPreset } from "./components/PresetAutomationHub";
-import OutputPreviewView from "./components/OutputPreviewView";
-import CustomerGuideView from "./components/CustomerGuideView";
-import SetupView from "./components/SetupView";
 import PipelineStep1 from "./components/pipeline/PipelineStep1";
 import LicenseGate from "./components/LicenseGate";
 import UpdateCenter from "./components/UpdateCenter";
-import TelegramAutomationScheduler from "./components/TelegramAutomationScheduler";
+
+// These screens are large and are not needed during the initial dashboard
+// paint. Load each one only when the customer opens its workflow so startup
+// remains responsive on ordinary Windows laptops.
+const PromptTemplatesHub = React.lazy(() => import("./components/PromptTemplatesHub"));
+const WorkflowGuideView = React.lazy(() => import("./components/WorkflowGuideView"));
+const CapCutSynchronizer = React.lazy(() => import("./components/CapCutSynchronizer"));
+const DetailedReportView = React.lazy(() => import("./components/DetailedReportView"));
+const AI33VoiceStudio = React.lazy(() => import("./components/AI33VoiceStudio"));
+const AudioTimelinePro = React.lazy(() => import("./components/AudioTimelinePro"));
+const AutomationControlCenter = React.lazy(() => import("./components/AutomationControlCenter"));
+const PresetAutomationHub = React.lazy(() => import("./components/PresetAutomationHub"));
+const OutputPreviewView = React.lazy(() => import("./components/OutputPreviewView"));
+const CustomerGuideView = React.lazy(() => import("./components/CustomerGuideView"));
+const SetupView = React.lazy(() => import("./components/SetupView"));
+const TelegramAutomationScheduler = React.lazy(() => import("./components/TelegramAutomationScheduler"));
 
 const FacebookMark = () => <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-current"><path d="M13.8 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5H17V4a21 21 0 0 0-2.3-.1c-2.3 0-3.8 1.4-3.8 4V10H8.3v3h2.6v8h2.9Z" /></svg>;
 const ZaloMark = () => <span aria-hidden="true" className="text-[15px] font-black italic tracking-[-0.12em]">Zalo</span>;
@@ -10140,7 +10145,13 @@ export default function App() {
         </div>
       )}
 
-      <style>{`img[alt="Thumbnail video"] { object-fit: contain !important; background: #020617; cursor: zoom-in; }`}</style>
+      <style>{`
+        img[alt="Thumbnail video"] { object-fit: contain !important; background: #020617; cursor: zoom-in; }
+        aside[aria-label$="VidiFlow"] { top: auto !important; right: 1rem !important; bottom: 1rem !important; transform: none !important; flex-direction: row !important; gap: .5rem !important; padding: .5rem; border: 1px solid #e2e8f0; border-radius: 1rem; background: rgba(255,255,255,.92); box-shadow: 0 12px 34px rgba(15,23,42,.18); backdrop-filter: blur(12px); }
+        aside[aria-label$="VidiFlow"] > button { width: 2.5rem !important; height: 2.5rem !important; box-shadow: none !important; }
+        aside[aria-label$="VidiFlow"] > button > span { display: none !important; }
+        aside[aria-label$="VidiFlow"] svg { width: 1.15rem !important; height: 1.15rem !important; }
+      `}</style>
       {expandedThumbnailUrl && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/85 p-5 backdrop-blur-sm" onClick={() => setExpandedThumbnailUrl("")} role="dialog" aria-modal="true" aria-label="Xem Thumbnail kích thước lớn">
           <div className="relative flex max-h-[92vh] max-w-[92vw] items-center justify-center" onClick={(event) => event.stopPropagation()}>

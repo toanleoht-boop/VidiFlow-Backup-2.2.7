@@ -12,6 +12,8 @@ backup*/
 .gemini/
 # Local runtime, generated artifacts, and customer data
 .codex-*/
+.codex-*.cjs
+.codex-*.cjs.map
 .vite-runtime-cache/
 data/
 logs/

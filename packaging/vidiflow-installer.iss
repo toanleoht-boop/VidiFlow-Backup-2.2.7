@@ -4,6 +4,9 @@
 #ifndef SourceDir
 #define SourceDir "..\release\VidiFlow-OneClick-Desktop-Windows\vidiflow_launcher.dist"
 #endif
+#ifndef OutputSuffix
+#define OutputSuffix ""
+#endif
 
 [Setup]
 AppId={{6F5D984A-6826-4FCF-A21B-5735BDFBA4E0}
@@ -15,7 +18,7 @@ DefaultGroupName=VidiFlow OneClick Content Studio
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=VidiFlow-Setup-{#AppVersion}
+OutputBaseFilename=VidiFlow-Setup-{#AppVersion}{#OutputSuffix}
 Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
