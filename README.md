@@ -2,7 +2,7 @@
 
 VidiFlow là ứng dụng desktop Windows hỗ trợ xây dựng video AI theo một quy trình thống nhất: chuẩn hóa kịch bản, chia cảnh, tạo media, tạo voice, SEO/thumbnail, render và chuẩn bị đăng lên mạng xã hội.
 
-Phiên bản hiện tại: **2.3.0**
+Phiên bản hiện tại: **2.3.1**
 
 ## Tính năng chính
 
@@ -78,6 +78,7 @@ Nuitka chỉ được giữ làm launcher legacy và có hậu tố `-legacy-nui
 ## An toàn dữ liệu
 
 - API chỉ chấp nhận yêu cầu hợp lệ từ giao diện local.
+- Mọi phản hồi API có `X-Request-ID` để đối chiếu lỗi hỗ trợ mà không ghi nội dung yêu cầu.
 - Endpoint preview chỉ phục vụ media cho phép.
 - Ảnh tham chiếu được kiểm tra loại file, chữ ký và giới hạn dung lượng.
 - Preset, project và hồ sơ trình duyệt của khách hàng không được đưa vào Git.

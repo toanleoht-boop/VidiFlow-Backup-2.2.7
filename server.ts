@@ -12,6 +12,7 @@ import { getPlaywrightPage, initPlaywright } from "./src/server/services/audioSe
 import { setViettheoGatewayHandler } from "./src/server/services/imageGeneratorService.js";
 import { createAutomationSchedulerRouter } from "./src/server/routes/automationSchedulerRoutes.js";
 import { createLocalSupportRouter } from "./src/server/routes/localSupportRoutes.js";
+import { apiErrorHandler, requestContextMiddleware } from "./src/server/middleware/requestContext.js";
 import {
   isSupportedImageContent,
   LOCAL_SECURITY_HEADERS,
@@ -317,6 +318,7 @@ async function cleanGeneratedMedia(filePath: string, mediaType: "image" | "video
 }
 
 app.disable("x-powered-by");
+app.use(requestContextMiddleware);
 app.use((req, res, next) => {
   for (const [header, value] of Object.entries(LOCAL_SECURITY_HEADERS)) {
     res.setHeader(header, value);
@@ -8299,15 +8301,7 @@ app.post("/api/timeline/ultra-process", (req, res) => {
 
 // Setup Vite Dev Server / Static files middleware
 async function startServer() {
-  const payloadErrorHandler: express.ErrorRequestHandler = (error, _req, res, next) => {
-    if (error?.type !== "entity.too.large") return next(error);
-    return res.status(413).json({
-      success: false,
-      code: "PAYLOAD_TOO_LARGE",
-      error: "Tệp hoặc nội dung tải lên vượt quá giới hạn an toàn.",
-    });
-  };
-  app.use(payloadErrorHandler);
+  app.use(apiErrorHandler);
 
   // All API handlers are registered above this point. Return a real JSON 404
   // for unknown API paths before Vite/the SPA fallback can turn them into an
@@ -8317,6 +8311,7 @@ async function startServer() {
       success: false,
       error: "API_NOT_FOUND",
       path: req.originalUrl,
+      requestId: res.locals.requestId,
     });
   });
 

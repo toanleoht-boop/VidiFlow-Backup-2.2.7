@@ -2,6 +2,20 @@
 
 Các thay đổi đáng chú ý của VidiFlow được ghi theo phiên bản phát hành.
 
+## 2.3.1 — 2026-08-30
+
+### Thương mại hóa và hỗ trợ
+
+- Thêm phân quyền tính năng theo gói Starter, Pro, Agency và Lifetime.
+- Thêm Trung tâm hỗ trợ, backup/restore cấu hình theo allowlist và hàng đợi chẩn đoán cục bộ.
+- Thêm giao diện khôi phục lỗi React, mã sự cố và thao tác gửi báo cáo do người dùng chủ động.
+- Tách các route hỗ trợ nội bộ khỏi server chính; không đưa credential hoặc truyền dữ liệu từ xa vào router này.
+- Thêm `X-Request-ID` và xử lý lỗi API tập trung, không trả chi tiết nội bộ nhạy cảm cho giao diện.
+
+### Phát hành
+
+- Bổ sung EULA, Privacy Notice, thông báo thành phần bên thứ ba và kiểm tra chữ ký cập nhật.
+- Mở rộng unit test, preset QA và smoke QA cho luồng hỗ trợ/backup.
 ## 2.3.0 — 2026-08-22
 
 ### Hiệu năng và giao diện

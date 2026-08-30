@@ -47,14 +47,25 @@ await run("Health", async () => {
   const result = await json("/api/health-check");
   if (result.status !== "ok") throw new Error(JSON.stringify(result));
   return result;
-});await run("Unknown API returns JSON 404", async () => {
+});
+await run("API request correlation ID", async () => {
+  const expected = "release-qa-request-1234";
+  const response = await fetch(`${base}/api/health-check`, { headers: { "X-Request-ID": expected } });
+  if (!response.ok || response.headers.get("x-request-id") !== expected) {
+    throw new Error(JSON.stringify({ status: response.status, requestId: response.headers.get("x-request-id") }));
+  }
+  return { requestId: expected };
+});
+await run("Unknown API returns JSON 404", async () => {
   const response = await fetch(`${base}/api/qa-route-that-must-not-exist`);
   const contentType = String(response.headers.get("content-type") || "");
   const result = await response.json().catch(() => ({}));
   if (
     response.status !== 404 ||
     !contentType.includes("application/json") ||
-    result.error !== "API_NOT_FOUND"
+    result.error !== "API_NOT_FOUND" ||
+    !result.requestId ||
+    result.requestId !== response.headers.get("x-request-id")
   ) {
     throw new Error(
       JSON.stringify({ status: response.status, contentType, result }),
