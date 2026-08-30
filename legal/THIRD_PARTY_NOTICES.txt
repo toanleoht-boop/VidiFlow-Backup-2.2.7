@@ -1,0 +1,22 @@
+VidiFlow Third-Party Notices
+Release 2.3.1
+
+VidiFlow includes or interoperates with third-party software. Copyright and license terms remain with their respective owners. The installed package may contain license files inside its runtime dependencies.
+
+Key bundled components include:
+- Electron (MIT) and Chromium (BSD-style licenses and additional component licenses)
+- React and React DOM (MIT)
+- Express (MIT)
+- Playwright (Apache License 2.0)
+- Google Gen AI JavaScript SDK (Apache License 2.0)
+- JSZip (MIT)
+- Lodash (MIT)
+- FFmpeg and ffmpeg-static (FFmpeg license terms depend on the bundled build and enabled codecs)
+- yt-dlp (The Unlicense, plus terms applicable to bundled dependencies and accessed services)
+- whisper.cpp (MIT) and the separately distributed model file under its applicable model terms
+- Python and the bundled portable Python runtime (Python Software Foundation License)
+- Nuitka components in the legacy package path (Apache License 2.0 and applicable dependency licenses)
+
+VidiFlow also connects to services that are not distributed as part of the application. Use of Google, YouTube, Facebook, TikTok, Telegram and configured AI/voice/media providers is governed by each provider's terms.
+
+Before a public commercial release, the release owner must run a dependency-license inventory against the exact packaged artifact and retain the output with the release manifest. If a bundled FFmpeg build changes, its codec configuration and corresponding LGPL/GPL obligations must be reviewed again.

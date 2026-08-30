@@ -1,0 +1,32 @@
+VidiFlow End-User License Agreement (EULA)
+Version 1.0 — Effective for VidiFlow 2.3.1 and later
+
+1. Scope
+This agreement governs installation and use of VidiFlow OneClick Content Studio ("VidiFlow"). By installing or using VidiFlow, the user accepts this agreement. If the user does not accept it, the software must not be installed or used.
+
+2. License grant
+Subject to a valid VidiFlow license and the purchased plan, VidiFlow grants the user a limited, non-exclusive, non-transferable right to install and use the software on authorized devices. The license does not transfer ownership of the software or its source code.
+
+3. Account and license security
+The user is responsible for protecting license keys, connected service credentials, browser profiles and accounts. License keys may not be shared, resold, bypassed or used beyond the purchased plan. VidiFlow may validate license status and device authorization through its licensing service.
+
+4. Permitted content and third-party services
+The user is responsible for content created, uploaded, downloaded, scheduled or published through VidiFlow and for complying with applicable law, platform rules and third-party service terms. VidiFlow does not grant rights to third-party media, voices, models, brands or accounts.
+
+5. Restrictions
+The user may not circumvent licensing or security controls, redistribute the software except as expressly authorized, use it to access accounts without permission, or use it for unlawful or abusive activity. Reverse engineering is prohibited only to the extent allowed by applicable law.
+
+6. Updates and availability
+VidiFlow may provide fixes, upgrades and license-controlled features. External AI, media and social platforms can change, limit or discontinue their services without notice; those external services are not controlled by VidiFlow.
+
+7. Data and backups
+VidiFlow stores projects and settings primarily on the user's device and may send user-selected content to configured third-party providers to perform requested operations. The user must maintain backups of projects, credentials and exported results.
+
+8. Disclaimer and limitation
+The software is provided on an "as available" basis. To the maximum extent permitted by law, no guarantee is made that every external provider, automation flow or generated result will remain uninterrupted or error-free. VidiFlow is not liable for platform enforcement, loss caused by third-party services, or loss of data that the user did not back up. Mandatory consumer rights remain unaffected.
+
+9. Termination
+This license ends if the user materially violates this agreement. On termination, use of the software must stop. Sections concerning ownership, restrictions, liability and third-party rights survive termination.
+
+10. Support and current terms
+Product information, support routes and current notices are available at https://vidiflow.site. Any separate written commercial agreement takes priority where it expressly conflicts with this EULA.

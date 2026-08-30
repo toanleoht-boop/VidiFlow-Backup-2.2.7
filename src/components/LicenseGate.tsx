@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Check, Clock3, Copy, Crown, KeyRound, ShieldCheck, Sparkles } from "lucide-react";
+import type { LicensePlan as Plan } from "../constants/licenseEntitlements";
 
-type Plan = "none" | "trial" | "starter" | "monthly" | "agency" | "lifetime";
 type LicenseStatus = {
   active: boolean;
   plan: Plan;

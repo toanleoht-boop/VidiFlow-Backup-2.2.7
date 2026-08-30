@@ -63,6 +63,8 @@ Copy-Item "$root\dist" "$stage\dist" -Recurse -Force
   # Vite already copies public assets into dist. Copy only the icon required
   # by Electron; copying the whole public tree duplicated large guides.
 Copy-Item "$root\public\brand" "$stage\brand" -Recurse -Force
+  Copy-Item "$root\legal" "$stage\legal" -Recurse -Force
+  Copy-Item "$root\CHANGELOG-$Version.txt" "$stage\CHANGELOG.txt" -Force
   $modules = Get-Item "$root\node_modules"; $moduleSource = if ($modules.LinkType) { $modules.Target[0] } else { $modules.FullName }
   robocopy $moduleSource "$stage\node_modules" /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
   if ($LASTEXITCODE -gt 7) { throw "node_modules copy failed: $LASTEXITCODE" }
@@ -129,6 +131,8 @@ Copy-Item "$root\public\brand" "$stage\brand" -Recurse -Force
   & "$tools\node_modules\.bin\electron-packager.cmd" $stage 'VidiFlow OneClick' --platform=win32 --arch=x64 --electron-version=$electronVersion --out=$out --overwrite --no-asar --no-prune --icon="$root\favicon.ico"
   if ($LASTEXITCODE -ne 0) { throw "Electron packaging failed: $LASTEXITCODE" }
   $desktopDir = "$out\VidiFlow OneClick-win32-x64"
+  Copy-Item "$root\legal" "$desktopDir\legal" -Recurse -Force
+  Copy-Item "$root\CHANGELOG-$Version.txt" "$desktopDir\CHANGELOG.txt" -Force
   Assert-NoBrowserProfiles "$desktopDir\resources\app"
   & $iscc "/DAppVersion=$Version" "/DSourceDir=$desktopDir" "$root\packaging\vidiflow-installer.iss"
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }

@@ -17,6 +17,7 @@ import {
   resolveAllowedLocalMediaPath,
   validateLocalRequest,
 } from "./src/server/security/localRequestSecurity.js";
+import { canUseAutomationMode, type LicensePlan } from "./src/constants/licenseEntitlements.js";
 
 // Secrets must live outside the installed application directory. The desktop
 // updater replaces that directory, which previously made customer API keys
@@ -349,7 +350,6 @@ if (launcherMode) {
   idleWatcher.unref();
 }
 
-type LicensePlan = "none" | "trial" | "starter" | "monthly" | "agency" | "lifetime";
 type LocalLicense = {
   key?: string;
   installationToken?: string;
@@ -569,10 +569,10 @@ app.post("/api/license/authorize-auto", async (req, res) => {
     writeLicense(updated);
     const visible = publicLicense(updated);
     if (!visible.active) return res.status(403).json({ allowed: false, error: "Bản quyền đã hết hạn hoặc chưa hoạt động." });
-    if (updated.plan === "starter" && requestedMode !== "preset") return res.status(403).json({ allowed: false, plan: updated.plan, error: "Gói Starter hỗ trợ Tạo từng bước và Tự động theo Preset. Hãy nâng cấp Gói Pro để dùng Tự động tùy chỉnh đầy đủ." });
+    if (!canUseAutomationMode(updated.plan, requestedMode)) return res.status(403).json({ allowed: false, plan: updated.plan, error: "Gói hiện tại chưa hỗ trợ chế độ tự động này." });
     return res.json({ allowed: true, plan: updated.plan, mode: requestedMode });
   } catch {
-    if (canUseOffline(current) && (current.plan !== "starter" || requestedMode === "preset")) return res.json({ allowed: true, plan: current.plan, mode: requestedMode, offline: true, message: "Đang dùng xác thực bản quyền đã lưu tạm thời." });
+    if (canUseOffline(current) && canUseAutomationMode(current.plan, requestedMode)) return res.json({ allowed: true, plan: current.plan, mode: requestedMode, offline: true, message: "Đang dùng xác thực bản quyền đã lưu tạm thời." });
     return res.status(503).json({ allowed: false, error: "Không thể kết nối dashboard để xác minh quyền chạy tự động." });
   }
 });
@@ -596,27 +596,46 @@ app.post("/api/license/trial", async (_req, res) => {
 app.post("/api/license/activate", async (req, res) => {
   const key = String(req.body?.key || "").trim().toUpperCase();
   if (!key) return res.status(400).json({ active: false, deviceId, error: "Vui lòng nhập key kích hoạt." });
-  try {
-    const response = await fetch(`${licenseApiUrl}/activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ activation_key: key, machine_hash: machineHash, app_version: APP_VERSION }) });
-    const payload: any = await response.json();
-    if (!response.ok || !payload?.installation_token) return res.status(response.status || 400).json({ active: false, deviceId, error: payload?.error || "Key không hợp lệ hoặc đã được dùng trên máy khác." });
-    const license = remoteLicenseToLocal({ ...emptyLicense(), quotas: { voice: 0, image: 0, gemini: 0 } }, payload, key);
-    writeLicense(license); return res.json(publicLicense(license));
-  } catch (error: any) { return res.status(502).json({ active: false, deviceId, error: `Không thể kết nối server kích hoạt: ${error.message}` }); }
-  const testKey = String(process.env.VIDIFLOW_TEST_LICENSE_KEY || "").trim().toUpperCase();
-  if (testKey && crypto.timingSafeEqual(Buffer.from(key.padEnd(Math.max(key.length, testKey.length))), Buffer.from(testKey.padEnd(Math.max(key.length, testKey.length))))) {
-    const local: LocalLicense = { key, plan: "lifetime", deviceId, activatedAt: new Date().toISOString(), expiresAt: null, quotas: { voice: 0, image: 0, gemini: 0 } };
-    writeLicense(local); return res.json(publicLicense(local));
+
+  // Release smoke tests run against an isolated data directory and must never
+  // contact or mutate the production licensing service. This path cannot be
+  // enabled by environment variables alone in a production process.
+  const testKey = process.env.NODE_ENV === "test"
+    ? String(process.env.VIDIFLOW_TEST_LICENSE_KEY || "").trim().toUpperCase()
+    : "";
+  if (testKey && key.length === testKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(testKey))) {
+    const now = new Date().toISOString();
+    const local: LocalLicense = {
+      key,
+      installationToken: `qa-${deviceId}`,
+      plan: "lifetime",
+      deviceId,
+      activatedAt: now,
+      lastVerifiedAt: now,
+      expiresAt: null,
+      quotas: { voice: 0, image: 0, gemini: 0 },
+      quotaSchemaVersion: 3,
+    };
+    writeLicense(local);
+    return res.json({ ...publicLicense(local), source: "isolated-release-qa" });
   }
-  const licenseServer = String(process.env.LICENSE_SERVER_URL || "").replace(/\/$/, "");
-  if (!licenseServer) return res.status(503).json({ active: false, deviceId, error: "Dashboard kích hoạt chưa được cấu hình. Hãy liên hệ Admin." });
+
   try {
-    const response = await fetch(`${licenseServer}/v1/licenses/activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, deviceId, product: "vidiflow-oneclick", version: APP_VERSION }) });
-    const data: any = await response.json();
-    if (!response.ok || !data?.active) return res.status(response.status || 400).json({ active: false, deviceId, error: data?.error || "Key không hợp lệ hoặc đã được dùng trên máy khác." });
-    const license: LocalLicense = { key, plan: data.plan, deviceId, activatedAt: data.activatedAt || new Date().toISOString(), expiresAt: data.expiresAt ?? null, quotas: data.quotas || { voice: 0, image: 0, gemini: 0 } };
-    writeLicense(license); res.json(publicLicense(license));
-  } catch (error: any) { res.status(502).json({ active: false, deviceId, error: `Không thể kết nối dashboard kích hoạt: ${error.message}` }); }
+    const response = await fetch(`${licenseApiUrl}/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activation_key: key, machine_hash: machineHash, app_version: APP_VERSION }),
+    });
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.installation_token) {
+      return res.status(response.status || 400).json({ active: false, deviceId, error: payload?.error || "Key không hợp lệ hoặc đã được dùng trên máy khác." });
+    }
+    const license = remoteLicenseToLocal({ ...emptyLicense(), quotas: { voice: 0, image: 0, gemini: 0 } }, payload, key);
+    writeLicense(license);
+    return res.json(publicLicense(license));
+  } catch (error: any) {
+    return res.status(502).json({ active: false, deviceId, error: `Không thể kết nối server kích hoạt: ${error.message}` });
+  }
 });
 
 // Application maintenance endpoints intentionally live before the general API
@@ -687,6 +706,43 @@ app.post("/api/update/completed-release/acknowledge", (_req, res) => {
   }
 });
 
+const signedUpdatesRequired = /^(1|true|yes|on)$/i.test(String(process.env.VIDIFLOW_REQUIRE_SIGNED_UPDATES || "").trim());
+const trustedUpdatePublisher = String(process.env.VIDIFLOW_TRUSTED_UPDATE_PUBLISHER || "").trim();
+
+type UpdateSignature = { status: string; subject: string; thumbprint: string };
+
+const verifyUpdateSignature = async (installerPath: string): Promise<UpdateSignature> => {
+  if (!signedUpdatesRequired && !trustedUpdatePublisher) {
+    return { status: "NotRequired", subject: "", thumbprint: "" };
+  }
+  if (process.platform !== "win32") throw new Error("UPDATE_SIGNATURE_PLATFORM_NOT_SUPPORTED");
+  const command = [
+    "$signature = Get-AuthenticodeSignature -LiteralPath $args[0]",
+    "$certificate = $signature.SignerCertificate",
+    "[pscustomobject]@{ status = [string]$signature.Status; subject = if ($certificate) { [string]$certificate.Subject } else { '' }; thumbprint = if ($certificate) { [string]$certificate.Thumbprint } else { '' } } | ConvertTo-Json -Compress",
+  ].join("; ");
+  const signature = await new Promise<UpdateSignature>((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command, installerPath],
+      { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 },
+      (error, stdout) => {
+        if (error) return reject(new Error("UPDATE_SIGNATURE_CHECK_FAILED"));
+        try {
+          const parsed = JSON.parse(String(stdout || "{}").trim());
+          resolve({ status: String(parsed.status || ""), subject: String(parsed.subject || ""), thumbprint: String(parsed.thumbprint || "") });
+        } catch {
+          reject(new Error("UPDATE_SIGNATURE_CHECK_FAILED"));
+        }
+      },
+    );
+  });
+  if (signature.status !== "Valid") throw new Error("UPDATE_SIGNATURE_INVALID");
+  if (trustedUpdatePublisher && !signature.subject.toLocaleLowerCase().includes(trustedUpdatePublisher.toLocaleLowerCase())) {
+    throw new Error("UPDATE_PUBLISHER_NOT_TRUSTED");
+  }
+  return signature;
+};
 const preparedUpdateMarker = path.join(licenseDataDir, "updates", "prepared-release.json");
 
 app.post("/api/update/download", async (_req, res) => {
@@ -721,12 +777,23 @@ app.post("/api/update/download", async (_req, res) => {
     const updatesDir = path.join(licenseDataDir, "updates"); fs.mkdirSync(updatesDir, { recursive: true });
     const installerPath = path.join(updatesDir, `VidiFlow-${String(manifest.version || "update").replace(/[^A-Za-z0-9._-]/g, "_")}${extension}`);
     fs.writeFileSync(installerPath, content);
+    let updateSignature: UpdateSignature;
+    try {
+      updateSignature = await verifyUpdateSignature(installerPath);
+    } catch (signatureError: any) {
+      try { fs.unlinkSync(installerPath); } catch {}
+      const signatureCode = String(signatureError?.message || "UPDATE_SIGNATURE_CHECK_FAILED");
+      return res.status(409).json({ error: signatureCode, detail: "Không thể xác minh chữ ký số của bộ cài cập nhật." });
+    }
     fs.writeFileSync(preparedUpdateMarker, JSON.stringify({
       version: String(manifest.version || "").trim(),
       notes: String(manifest.notes || "").trim(),
       installer_path: installerPath,
       installer_type: extension === ".msi" ? "msi" : "exe",
       sha256: checksum,
+      signature_status: updateSignature.status,
+      signature_subject: updateSignature.subject,
+      signature_thumbprint: updateSignature.thumbprint,
       downloaded_at: new Date().toISOString(),
     }, null, 2), "utf8");
     return res.json({
@@ -769,6 +836,12 @@ app.post("/api/update/install", async (_req, res) => {
     const actualChecksum = crypto.createHash("sha256").update(preparedContent).digest("hex");
     if (actualChecksum !== checksum) {
       return res.status(409).json({ error: "UPDATE_CHECKSUM_MISMATCH" });
+    }
+    try {
+      await verifyUpdateSignature(resolvedInstaller);
+    } catch (signatureError: any) {
+      const signatureCode = String(signatureError?.message || "UPDATE_SIGNATURE_CHECK_FAILED");
+      return res.status(409).json({ error: signatureCode, detail: "Bộ cài cập nhật không vượt qua bước xác minh chữ ký số." });
     }
 
     // An installer cannot replace Electron/Chromium DLLs while the desktop
@@ -8197,7 +8270,7 @@ async function startServer() {
     });
   });
 
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && process.env.VIDIFLOW_STATIC_SERVER !== "1") {
     // Vite is a development/build dependency only. Loading it lazily keeps
     // PostCSS and the complete dev server out of the packaged customer runtime.
     const { createServer: createViteServer } = await import("vite");

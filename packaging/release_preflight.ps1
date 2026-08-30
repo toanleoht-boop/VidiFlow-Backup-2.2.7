@@ -2,10 +2,16 @@
 param(
   [switch]$BuildInstaller,
   [switch]$RequireCleanTree,
-  [switch]$RequireSignature
+  [switch]$RequireSignature,
+  [switch]$Commercial
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Commercial) {
+  $BuildInstaller = $true
+  $RequireCleanTree = $true
+  $RequireSignature = $true
+}
 $root = Split-Path -Parent $PSScriptRoot
 $package = Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json
 $versionFile = Get-Content -LiteralPath (Join-Path $root 'version.json') -Raw | ConvertFrom-Json
@@ -30,6 +36,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Runtime dependency audit failed: $LASTEXITCODE" }
   npm.cmd run build
   if ($LASTEXITCODE -ne 0) { throw "Production build failed: $LASTEXITCODE" }
+  & "$root\scripts\qa_release.ps1"
+  if ($LASTEXITCODE -ne 0) { throw "Release smoke tests failed: $LASTEXITCODE" }
 
   if ($BuildInstaller) {
     & "$PSScriptRoot\build_electron_desktop.ps1" -Version $package.version -RequireSignature:$RequireSignature

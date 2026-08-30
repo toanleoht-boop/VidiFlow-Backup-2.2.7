@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { BrainstormResult, Storyboard, SEOResults, ProductionProgress } from "./types";
 import type { AutomationPreset } from "./components/PresetAutomationHub";
+import { canUseAutomationMode, type LicensePlan } from "./constants/licenseEntitlements";
 
 type CharacterProfile = {
   id: string;
@@ -328,7 +329,7 @@ export default function App() {
   const [apiKeyOk, setApiKeyOk] = useState<boolean | null>(null);
   const [checkingKey, setCheckingKey] = useState<boolean>(true);
   const [geminiStatusLabel, setGeminiStatusLabel] = useState<string>("Đang kiểm tra...");
-  const [licensePlan, setLicensePlan] = useState<"none" | "trial" | "starter" | "monthly" | "agency" | "lifetime">("none");
+  const [licensePlan, setLicensePlan] = useState<LicensePlan>("none");
   const [showUpdateCenter, setShowUpdateCenter] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const completedReleaseCheckedRef = useRef(false);
@@ -5640,8 +5641,8 @@ export default function App() {
               </button>
               <button
                 onClick={() => {
-                  if (licensePlan === "starter") {
-                    window.alert("Gói Khởi đầu chỉ dùng Tạo video từng bước. Hãy nâng cấp Gói Pro để mở Tạo video tự động.");
+                  if (!canUseAutomationMode(licensePlan, "full")) {
+                    window.alert("Gói hiện tại chưa hỗ trợ Tạo video tự động tùy chỉnh đầy đủ. Bạn vẫn có thể dùng Tạo từng bước hoặc Tự động theo Preset.");
                     setActiveStep("manualpipeline");
                     return;
                   }
@@ -5661,8 +5662,8 @@ export default function App() {
 
               <button
                 onClick={() => {
-                  if (licensePlan === "starter") {
-                    window.alert("Gói Khởi đầu chỉ dùng Tạo video từng bước. Hãy nâng cấp Gói Pro để mở Tự động theo Preset.");
+                  if (!canUseAutomationMode(licensePlan, "preset")) {
+                    window.alert("Vui lòng kích hoạt VidiFlow để dùng Tự động theo Preset.");
                     setActiveStep("manualpipeline");
                     return;
                   }

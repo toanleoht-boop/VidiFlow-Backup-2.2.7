@@ -26,6 +26,8 @@ try {
 
   $launcherDist = Join-Path $nuitkaOutput 'vidiflow_launcher.dist'
   if (-not (Test-Path -LiteralPath $launcherDist)) { throw 'Nuitka did not create the launcher.' }
+  Copy-Item (Join-Path $root 'legal') (Join-Path $launcherDist 'legal') -Recurse -Force
+  Copy-Item (Join-Path $root "CHANGELOG-$Version.txt") (Join-Path $launcherDist 'CHANGELOG.txt') -Force
   $app = Join-Path $launcherDist 'app'
   New-Item -ItemType Directory -Path $app -Force | Out-Null
   Copy-Item (Join-Path $root 'dist') (Join-Path $app 'dist') -Recurse -Force

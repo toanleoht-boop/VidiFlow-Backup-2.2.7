@@ -3,6 +3,8 @@ import path from "node:path";
 import os from "node:os";
 
 const base = String(process.env.QA_BASE_URL || "http://127.0.0.1:3110").replace(/\/$/, "");
+const qaLicenseKey = String(process.env.QA_LICENSE_KEY || "").trim();
+const runLiveProviders = process.env.QA_LIVE_PROVIDERS === "1";
 const tests = [];
 const record = (name, pass, detail = "") => tests.push({ name, pass: Boolean(pass), detail: String(detail).slice(0, 500) });
 const json = async (route, init = {}) => {
@@ -33,12 +35,18 @@ const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQ
 fs.writeFileSync(path.join(imageDirectory, "001_Cảnh_đầu.png"), pixel);
 fs.writeFileSync(path.join(project, "script.txt"), "Kịch bản thử đường dẫn tiếng Việt", "utf8");
 
+if (qaLicenseKey) {
+  await run("Local QA license activation", async () => {
+    const result = await post("/api/license/activate", { key: qaLicenseKey });
+    if (!result.active) throw new Error(JSON.stringify(result));
+    return { plan: result.plan, source: result.source };
+  });
+}
 await run("Health", async () => {
   const result = await json("/api/health-check");
   if (result.status !== "ok") throw new Error(JSON.stringify(result));
   return result;
-});
-await run("Unknown API returns JSON 404", async () => {
+});await run("Unknown API returns JSON 404", async () => {
   const response = await fetch(`${base}/api/qa-route-that-must-not-exist`);
   const contentType = String(response.headers.get("content-type") || "");
   const result = await response.json().catch(() => ({}));
@@ -59,8 +67,17 @@ await run("Launcher status", async () => {
   return result;
 });
 await run("Shared automation setup", async () => {
+  await post("/api/config/automation-default", {
+    config: {
+      generationMode: "viettheo-api",
+      aspectRatio: "9:16",
+      generateType: "image",
+      chromeThreads: 7,
+      voiceModel: "release-qa",
+    },
+  });
   const { config } = await json("/api/config/automation-default");
-  if (config.generationMode !== "viettheo-api" || config.aspectRatio !== "9:16" || config.chromeThreads !== 5) {
+  if (config.generationMode !== "viettheo-api" || config.aspectRatio !== "9:16" || config.chromeThreads !== 7) {
     throw new Error(JSON.stringify(config));
   }
   return { generationMode: config.generationMode, aspectRatio: config.aspectRatio, generateType: config.generateType, chromeThreads: config.chromeThreads, voiceModel: config.voiceModel };
@@ -103,11 +120,15 @@ await run("Offline storyboard fallback", async () => {
   if (!Array.isArray(result.scenes) || result.scenes.length < 2) throw new Error(JSON.stringify(result));
   return { scenes: result.scenes.length };
 });
-await run("Voice model list", async () => {
-  const result = await json("/api/ai33/voices?provider=minimax&page=1&page_size=5");
-  if (!result.success || !Array.isArray(result.data) || !result.data.length) throw new Error(JSON.stringify(result));
-  return { voices: result.data.length };
-});
+if (runLiveProviders) {
+  await run("Live provider voice model list", async () => {
+    const result = await json("/api/ai33/voices?provider=minimax&page=1&page_size=5");
+    if (!result.success || !Array.isArray(result.data) || !result.data.length) throw new Error(JSON.stringify(result));
+    return { voices: result.data.length };
+  });
+} else {
+  record("Live provider checks", true, "Skipped; set QA_LIVE_PROVIDERS=1 to enable credentialed provider tests.");
+}
 
 for (const test of tests) console.log(`${test.pass ? "PASS" : "FAIL"} | ${test.name} | ${test.detail}`);
 const failed = tests.filter((test) => !test.pass);

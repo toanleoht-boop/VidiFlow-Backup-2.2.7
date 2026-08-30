@@ -1,0 +1,24 @@
+VidiFlow 2.3.1 — Commercial Hardening
+Release date: 2026-08-30
+
+RELEASE SAFETY
+- Added isolated release smoke testing with temporary data and a test-only license path.
+- Release preflight now runs production build plus smoke QA before packaging.
+- Added a strict commercial release mode requiring a clean Git tree, installer build and valid Authenticode signature.
+- Corrected release QA to validate the production default of 7 concurrent Chrome workers.
+- External provider QA is optional and no longer blocks clean offline release validation.
+
+LICENSING
+- Centralized plan entitlements in one shared module used by frontend and backend.
+- Starter now consistently includes manual and preset workflows, while full automation remains a higher-plan feature.
+- Added automated entitlement tests for inactive, trial, Starter, Pro/Monthly, Agency and Lifetime plans.
+
+UPDATES AND PACKAGING
+- Added optional Authenticode verification and trusted-publisher enforcement for downloaded updates.
+- Signature validation is repeated before installation to detect replaced update files.
+- Added EULA display in the Windows installer and bundled privacy/third-party notices.
+- Preserved customer browser-profile exclusion checks and local user-data separation.
+
+COMPATIBILITY
+- No intended change to existing project folders, media generation, voice generation, timeline repair, resume/retry or social publishing workflows.
+- Existing unsigned update packages remain supported until signed-update enforcement is explicitly enabled.

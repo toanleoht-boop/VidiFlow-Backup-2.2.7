@@ -1,0 +1,26 @@
+VidiFlow Privacy Notice
+Effective for VidiFlow 2.3.1 and later
+
+Overview
+VidiFlow is a Windows desktop content-production application. Most project files, presets, media, task history, browser-profile references and settings are stored locally on the user's computer.
+
+Data processed locally
+Depending on enabled features, VidiFlow may process scripts, images, video, audio, captions, project paths, presets, publishing configuration, task logs and locally selected browser profiles. Secrets are stored in the VidiFlow user-data directory rather than the application installation directory. Users should secure the Windows account and device where those files are stored.
+
+External providers
+When a user invokes an AI, voice, media, transcription, download or publishing feature, VidiFlow sends the inputs required for that request to the provider selected or configured by the user. Examples can include Google AI services, configured image or voice APIs, YouTube, Facebook, TikTok, Telegram and media-download services. Those providers process data under their own privacy terms. VidiFlow does not control their retention or model-training policies.
+
+Licensing and updates
+VidiFlow may send a license key or derived license identifier, a device hash, application version, platform and validation status to https://vidiflow.site for activation, plan authorization, trial handling and update checks. Raw Windows passwords and browser passwords are not required by the licensing service.
+
+Browser automation
+VidiFlow uses Chrome installed on the user's device. Customer browser profiles, cookies and signed-in sessions are not bundled in the installer. Publishing automation acts only on profiles and destinations selected by the user.
+
+Retention and deletion
+Local project and application data remain until the user deletes them or uninstalls/removes the relevant data directories. Data held by an external provider must be managed through that provider. License records may be retained as needed for activation, fraud prevention, support and commercial records.
+
+Security
+VidiFlow masks configured provider secrets in its interface and API responses where supported and validates local-file requests. No software can guarantee absolute security; users should keep Windows, Chrome and VidiFlow updated and avoid sharing license keys or profiles.
+
+Questions
+Use the support route published at https://vidiflow.site. This notice should be updated whenever providers, collected fields, retention rules or the licensing backend materially change.
