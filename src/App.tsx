@@ -26,6 +26,7 @@ import {
   Users,
   Eye,
   HelpCircle,
+  LifeBuoy,
   Sliders,
   RefreshCw,
   Wand2,
@@ -74,6 +75,7 @@ import { vidiflowAlert, vidiflowConfirm } from "./components/VidiFlowDialogCente
 import PipelineStep1 from "./components/pipeline/PipelineStep1";
 import LicenseGate from "./components/LicenseGate";
 import UpdateCenter from "./components/UpdateCenter";
+import SupportCenter from "./components/SupportCenter";
 
 // These screens are large and are not needed during the initial dashboard
 // paint. Load each one only when the customer opens its workflow so startup
@@ -331,6 +333,7 @@ export default function App() {
   const [geminiStatusLabel, setGeminiStatusLabel] = useState<string>("Đang kiểm tra...");
   const [licensePlan, setLicensePlan] = useState<LicensePlan>("none");
   const [showUpdateCenter, setShowUpdateCenter] = useState(false);
+  const [showSupportCenter, setShowSupportCenter] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const completedReleaseCheckedRef = useRef(false);
   const autoPipelineRunnerRef = useRef<(twoStage?: boolean, manualStageOverride?: 1 | 2 | 3 | 4) => Promise<void>>(async () => {});
@@ -5737,6 +5740,10 @@ export default function App() {
                 <Download className="w-4 h-4 text-slate-400" /><span>Kiểm tra cập nhật</span>
               </button>
 
+              <button onClick={() => setShowSupportCenter(true)} className="w-full text-left px-5 py-2.5 flex items-center gap-3 text-xs transition-all cursor-pointer text-slate-600 hover:bg-sky-50 hover:text-sky-700">
+                <LifeBuoy className="w-4 h-4 text-sky-500" /><span>Hỗ trợ & Backup</span>
+              </button>
+
               <button 
                 onClick={() => {
                   setActiveStep("setup");
@@ -10086,6 +10093,7 @@ export default function App() {
       )}
 
       {showUpdateCenter && <UpdateCenter onClose={() => setShowUpdateCenter(false)} />}
+      {showSupportCenter && <SupportCenter onClose={() => setShowSupportCenter(false)} />}
 
       {showClearProjectModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onMouseDown={() => setShowClearProjectModal(false)}>

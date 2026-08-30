@@ -18,6 +18,7 @@ import {
   validateLocalRequest,
 } from "./src/server/security/localRequestSecurity.js";
 import { canUseAutomationMode, type LicensePlan } from "./src/constants/licenseEntitlements.js";
+import { createSettingsBackup, getSettingsFileStatus, restoreSettingsBackup } from "./src/server/services/settingsBackupService.js";
 
 // Secrets must live outside the installed application directory. The desktop
 // updater replaces that directory, which previously made customer API keys
@@ -970,6 +971,72 @@ try {
   } catch (error: any) { return res.status(502).json({ error: "UPDATE_INSTALL_FAILED", detail: String(error?.message || "").slice(0, 160) }); }
 });
 
+const getPendingDiagnosticCount = () => {
+  try {
+    const file = path.join(licenseDataDir, "diagnostics-pending.jsonl");
+    return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+};
+
+const buildSupportSystemInfo = () => {
+  const local = readLicense();
+  const visible = publicLicense(local);
+  return {
+    appVersion: APP_VERSION,
+    platform: process.platform,
+    arch: process.arch,
+    nodeVersion: process.version,
+    uptimeSeconds: Math.floor(process.uptime()),
+    desktopMode: Number(process.env.VIDIFLOW_DESKTOP_PID || 0) > 0,
+    dataDirectory: licenseDataDir,
+    license: {
+      active: visible.active,
+      plan: visible.plan,
+      expiresAt: visible.expiresAt,
+      lastVerifiedAt: visible.lastVerifiedAt,
+      offlineGraceRemainingHours: visible.offlineGraceRemainingHours,
+    },
+    providers: {
+      gemini: Boolean(String(process.env.GEMINI_API_KEY || "").trim()) || visible.active,
+      ai33: Boolean(String(process.env.AI_33_API_KEY || "").trim()) || visible.active,
+      viettheo: Boolean(String(process.env.VIETTHEO_API_KEY || "").trim()) || visible.active,
+      apiSource: String(process.env.VIDIFLOW_API_SOURCE || "managed"),
+    },
+    updateSecurity: {
+      signedUpdatesRequired,
+      trustedPublisherConfigured: Boolean(trustedUpdatePublisher),
+    },
+    settingsFiles: getSettingsFileStatus(licenseDataDir),
+    pendingDiagnostics: getPendingDiagnosticCount(),
+  };
+};
+
+app.get("/api/support/system-info", (_req, res) => {
+  return res.json({ ok: true, system: buildSupportSystemInfo() });
+});
+
+app.get("/api/support/settings-backup", (_req, res) => {
+  try {
+    const backup = createSettingsBackup(licenseDataDir, APP_VERSION);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Disposition", `attachment; filename="VidiFlow-settings-${stamp}.json"`);
+    return res.json(backup);
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: String(error?.message || "SETTINGS_BACKUP_FAILED") });
+  }
+});
+
+app.post("/api/support/settings-restore", (req, res) => {
+  try {
+    const result = restoreSettingsBackup(licenseDataDir, req.body?.backup);
+    return res.json({ ok: true, ...result, reloadRequired: true });
+  } catch (error: any) {
+    const code = String(error?.message || "SETTINGS_RESTORE_FAILED");
+    return res.status(400).json({ ok: false, error: code });
+  }
+});
 function redactedDiagnostic(value: unknown): unknown {
   if (typeof value === "string") return value.replace(/(api[_-]?key|token|secret|activation[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]").slice(0, 2000);
   if (Array.isArray(value)) return value.slice(0, 30).map(redactedDiagnostic);
@@ -985,6 +1052,11 @@ app.post("/api/support/diagnostics", async (req, res) => {
     plan: publicLicense(local).plan,
     page: String(req.body?.page || "app").slice(0, 120),
     note: redactedDiagnostic(String(req.body?.note || "")),
+    system: redactedDiagnostic({
+      uptimeSeconds: Math.floor(process.uptime()),
+      desktopMode: Number(process.env.VIDIFLOW_DESKTOP_PID || 0) > 0,
+      configuredSettings: getSettingsFileStatus(licenseDataDir).filter((item) => item.ready).map((item) => item.name),
+    }),
     created_at: new Date().toISOString(),
   };
   try {
@@ -995,7 +1067,7 @@ app.post("/api/support/diagnostics", async (req, res) => {
     // Preserve a redacted local copy so no report is silently lost while the
     // hosting server is unavailable. It contains no provider credential.
     try { fs.mkdirSync(licenseDataDir, { recursive: true }); fs.appendFileSync(path.join(licenseDataDir, "diagnostics-pending.jsonl"), JSON.stringify(payload) + "\n", "utf8"); } catch {}
-    return res.status(503).json({ ok: false, error: "DIAGNOSTIC_SERVER_UNAVAILABLE" });
+    return res.status(202).json({ ok: true, queued: true, message: "Báo cáo đã được lưu cục bộ và sẽ gửi lại khi máy chủ hỗ trợ hoạt động." });
   }
 });
 

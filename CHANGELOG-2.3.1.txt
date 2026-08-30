@@ -19,6 +19,12 @@ UPDATES AND PACKAGING
 - Added EULA display in the Windows installer and bundled privacy/third-party notices.
 - Preserved customer browser-profile exclusion checks and local user-data separation.
 
+SUPPORT AND DATA SAFETY
+- Added a dedicated Support & Backup center with local system status and redacted diagnostic reporting.
+- Added allowlisted settings export/import for presets, styles, automation settings and named Chrome profile configuration.
+- License files, provider secrets, Telegram tokens, cookies and project media are excluded from settings backups.
+- Restore creates a timestamped snapshot before replacing an existing settings file.
+
 COMPATIBILITY
 - No intended change to existing project folders, media generation, voice generation, timeline repair, resume/retry or social publishing workflows.
 - Existing unsigned update packages remain supported until signed-update enforcement is explicitly enabled.

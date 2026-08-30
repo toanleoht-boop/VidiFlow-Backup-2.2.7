@@ -5,6 +5,7 @@ import os from "node:os";
 const base = String(process.env.QA_BASE_URL || "http://127.0.0.1:3110").replace(/\/$/, "");
 const qaLicenseKey = String(process.env.QA_LICENSE_KEY || "").trim();
 const runLiveProviders = process.env.QA_LIVE_PROVIDERS === "1";
+const expectedVersion = JSON.parse(fs.readFileSync(path.join(process.cwd(), "version.json"), "utf8").replace(/^\\uFEFF/, "")).version;
 const tests = [];
 const record = (name, pass, detail = "") => tests.push({ name, pass: Boolean(pass), detail: String(detail).slice(0, 500) });
 const json = async (route, init = {}) => {
@@ -82,7 +83,31 @@ await run("Shared automation setup", async () => {
   }
   return { generationMode: config.generationMode, aspectRatio: config.aspectRatio, generateType: config.generateType, chromeThreads: config.chromeThreads, voiceModel: config.voiceModel };
 });
-await run("Provider secrets are masked", async () => {
+await run("Support system info", async () => {
+  const result = await json("/api/support/system-info");
+  if (!result.ok || result.system?.appVersion !== expectedVersion || !Array.isArray(result.system?.settingsFiles)) throw new Error(JSON.stringify(result));
+  return { version: result.system.appVersion, settingsFiles: result.system.settingsFiles.length, pendingDiagnostics: result.system.pendingDiagnostics };
+});
+await run("Safe settings backup", async () => {
+  const result = await json("/api/support/settings-backup");
+  const serialized = JSON.stringify(result);
+  if (result.product !== "vidiflow-oneclick" || result.schemaVersion !== 1 || !result.files?.["automation-default.json"]) throw new Error(serialized);
+  if (/secrets\.env|license\.json|VIDIFLOW-QA-LOCAL-ONLY/i.test(serialized)) throw new Error("Backup exposed a protected file or license key");
+  return { files: Object.keys(result.files) };
+});
+await run("Settings restore with snapshot", async () => {
+  const result = await post("/api/support/settings-restore", {
+    backup: {
+      schemaVersion: 1,
+      product: "vidiflow-oneclick",
+      appVersion: expectedVersion,
+      exportedAt: new Date().toISOString(),
+      files: { "style-library.json": { customStyles: [{ id: "qa", name: "QA", desc: "", prompt: "safe test style" }], savedStyles: [] } },
+    },
+  });
+  if (!result.ok || !result.restoredFiles?.includes("style-library.json")) throw new Error(JSON.stringify(result));
+  return { restoredFiles: result.restoredFiles, snapshotCreated: Boolean(result.snapshotDirectory) };
+});await run("Provider secrets are masked", async () => {
   const result = await json("/api/config/keys");
   for (const key of ["GEMINI_API_KEY", "AI_33_API_KEY", "VIETTHEO_API_KEY"]) {
     if (result[key] && !String(result[key]).includes("*")) throw new Error(`${key} is not masked`);
