@@ -11,6 +11,7 @@ import pipelineController from "./src/server/controllers/pipelineController.js";
 import { getPlaywrightPage, initPlaywright } from "./src/server/services/audioService.js";
 import { setViettheoGatewayHandler } from "./src/server/services/imageGeneratorService.js";
 import { createAutomationSchedulerRouter } from "./src/server/routes/automationSchedulerRoutes.js";
+import { createLocalSupportRouter } from "./src/server/routes/localSupportRoutes.js";
 import {
   isSupportedImageContent,
   LOCAL_SECURITY_HEADERS,
@@ -18,8 +19,8 @@ import {
   validateLocalRequest,
 } from "./src/server/security/localRequestSecurity.js";
 import { canUseAutomationMode, type LicensePlan } from "./src/constants/licenseEntitlements.js";
-import { createSettingsBackup, getSettingsFileStatus, restoreSettingsBackup } from "./src/server/services/settingsBackupService.js";
-import { clearDiagnosticQueue, countQueuedDiagnostics, enqueueDiagnostic, readQueuedDiagnostics, type DiagnosticPayload } from "./src/server/services/diagnosticQueueService.js";
+import { getSettingsFileStatus } from "./src/server/services/settingsBackupService.js";
+import { countQueuedDiagnostics, enqueueDiagnostic, type DiagnosticPayload } from "./src/server/services/diagnosticQueueService.js";
 
 // Secrets must live outside the installed application directory. The desktop
 // updater replaces that directory, which previously made customer API keys
@@ -1008,47 +1009,18 @@ const buildSupportSystemInfo = () => {
   };
 };
 
-app.get("/api/support/system-info", (_req, res) => {
-  return res.json({ ok: true, system: buildSupportSystemInfo() });
-});
-
-app.get("/api/support/settings-backup", (_req, res) => {
-  try {
-    const backup = createSettingsBackup(licenseDataDir, APP_VERSION);
-    const stamp = new Date().toISOString().slice(0, 10);
-    res.setHeader("Content-Disposition", `attachment; filename="VidiFlow-settings-${stamp}.json"`);
-    return res.json(backup);
-  } catch (error: any) {
-    return res.status(500).json({ ok: false, error: String(error?.message || "SETTINGS_BACKUP_FAILED") });
-  }
-});
-
-app.post("/api/support/settings-restore", (req, res) => {
-  try {
-    const result = restoreSettingsBackup(licenseDataDir, req.body?.backup);
-    return res.json({ ok: true, ...result, reloadRequired: true });
-  } catch (error: any) {
-    const code = String(error?.message || "SETTINGS_RESTORE_FAILED");
-    return res.status(400).json({ ok: false, error: code });
-  }
-});
+app.use("/api/support", createLocalSupportRouter({
+  appVersion: APP_VERSION,
+  dataDirectory: licenseDataDir,
+  diagnosticsQueueFile,
+  buildSystemInfo: buildSupportSystemInfo,
+}));
 function redactedDiagnostic(value: unknown): unknown {
   if (typeof value === "string") return value.replace(/(api[_-]?key|token|secret|activation[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]").slice(0, 2000);
   if (Array.isArray(value)) return value.slice(0, 30).map(redactedDiagnostic);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => !/(key|token|secret|password)/i.test(key)).map(([key, item]) => [key, redactedDiagnostic(item)]));
   return value;
 }
-app.get("/api/support/diagnostics/export", (_req, res) => {
-  const reports = readQueuedDiagnostics(diagnosticsQueueFile);
-  const stamp = new Date().toISOString().slice(0, 10);
-  res.setHeader("Content-Disposition", `attachment; filename="VidiFlow-diagnostics-${stamp}.json"`);
-  return res.json({ schemaVersion: 1, product: "vidiflow-oneclick", exportedAt: new Date().toISOString(), reports });
-});
-
-app.delete("/api/support/diagnostics/queued", (_req, res) => {
-  return res.json({ ok: true, cleared: clearDiagnosticQueue(diagnosticsQueueFile) });
-});
-
 app.post("/api/support/diagnostics", async (req, res) => {
   const local = readLicense();
   const payload: DiagnosticPayload = {
