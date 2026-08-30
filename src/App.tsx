@@ -74,8 +74,6 @@ const buildCharacterBible = (profiles: CharacterProfile[]): string => {
 import { vidiflowAlert, vidiflowConfirm } from "./components/VidiFlowDialogCenter";
 import PipelineStep1 from "./components/pipeline/PipelineStep1";
 import LicenseGate from "./components/LicenseGate";
-import UpdateCenter from "./components/UpdateCenter";
-import SupportCenter from "./components/SupportCenter";
 
 // These screens are large and are not needed during the initial dashboard
 // paint. Load each one only when the customer opens its workflow so startup
@@ -92,6 +90,14 @@ const OutputPreviewView = React.lazy(() => import("./components/OutputPreviewVie
 const CustomerGuideView = React.lazy(() => import("./components/CustomerGuideView"));
 const SetupView = React.lazy(() => import("./components/SetupView"));
 const TelegramAutomationScheduler = React.lazy(() => import("./components/TelegramAutomationScheduler"));
+const UpdateCenter = React.lazy(() => import("./components/UpdateCenter"));
+const SupportCenter = React.lazy(() => import("./components/SupportCenter"));
+
+const ModalFeatureLoading = () => (
+  <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div className="rounded-2xl bg-white px-6 py-5 text-center shadow-2xl"><RefreshCw className="mx-auto h-6 w-6 animate-spin text-violet-600" /><p className="mt-3 text-sm font-black text-slate-800">Đang mở tính năng…</p></div>
+  </div>
+);
 
 const FacebookMark = () => <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6 fill-current"><path d="M13.8 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5H17V4a21 21 0 0 0-2.3-.1c-2.3 0-3.8 1.4-3.8 4V10H8.3v3h2.6v8h2.9Z" /></svg>;
 const ZaloMark = () => <span aria-hidden="true" className="text-[15px] font-black italic tracking-[-0.12em]">Zalo</span>;
@@ -10092,8 +10098,8 @@ export default function App() {
         </div>
       )}
 
-      {showUpdateCenter && <UpdateCenter onClose={() => setShowUpdateCenter(false)} />}
-      {showSupportCenter && <SupportCenter onClose={() => setShowSupportCenter(false)} />}
+      {showUpdateCenter && <React.Suspense fallback={<ModalFeatureLoading />}><UpdateCenter onClose={() => setShowUpdateCenter(false)} /></React.Suspense>}
+      {showSupportCenter && <React.Suspense fallback={<ModalFeatureLoading />}><SupportCenter onClose={() => setShowSupportCenter(false)} /></React.Suspense>}
 
       {showClearProjectModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onMouseDown={() => setShowClearProjectModal(false)}>

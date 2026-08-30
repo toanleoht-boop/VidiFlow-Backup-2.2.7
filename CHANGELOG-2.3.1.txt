@@ -25,6 +25,11 @@ SUPPORT AND DATA SAFETY
 - License files, provider secrets, Telegram tokens, cookies and project media are excluded from settings backups.
 - Restore creates a timestamped snapshot before replacing an existing settings file.
 
+RELIABILITY AND PERFORMANCE
+- Enabled the in-app notification center that was previously defined but not mounted.
+- Expanded the React error screen with a stable error ID, retry, reload, safe copy and diagnostic submission actions.
+- Lazy-loaded Support Center and Updater, reducing the initial application bundle by about 12.5 KB.
+
 COMPATIBILITY
 - No intended change to existing project folders, media generation, voice generation, timeline repair, resume/retry or social publishing workflows.
 - Existing unsigned update packages remain supported until signed-update enforcement is explicitly enabled.

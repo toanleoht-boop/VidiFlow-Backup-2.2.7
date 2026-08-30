@@ -12,6 +12,8 @@ interface State {
   hasError: boolean;
   error: Error | null;
   info: ErrorInfo | null;
+  errorId: string;
+  reportState: "idle" | "sending" | "sent" | "queued" | "error";
 }
 
 type Notice = { id: number; message: string; type: 'error' | 'success' | 'info' };
@@ -67,14 +69,50 @@ class ErrorBoundary extends Component<Props, State> {
   declare setState: (state: Partial<State>) => void;
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null, info: null };
+    this.state = { hasError: false, error: null, info: null, errorId: `VF-${Date.now().toString(36).toUpperCase()}`, reportState: "idle" };
   }
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, info: null };
+  static getDerivedStateFromError(error: Error): Partial<State> {
+    return { hasError: true, error, info: null, reportState: "idle" };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     this.setState({ info });
   }
+  getDiagnosticText = () => {
+    const raw = [
+      `Error ID: ${this.state.errorId}`,
+      `VidiFlow URL: ${window.location.href}`,
+      `Time: ${new Date().toISOString()}`,
+      this.state.error?.toString() || "Unknown React error",
+      this.state.info?.componentStack || "",
+    ].join("\n");
+    return raw.replace(/(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]").slice(0, 6000);
+  };
+  copyDiagnostic = async () => {
+    try {
+      await navigator.clipboard.writeText(this.getDiagnosticText());
+      window.dispatchEvent(new CustomEvent("vf:notice", { detail: { message: "Đã sao chép thông tin lỗi an toàn." } }));
+    } catch {
+      window.alert("Không thể sao chép tự động. Hãy mở Chi tiết kỹ thuật và sao chép thủ công.");
+    }
+  };
+  sendDiagnostic = async () => {
+    this.setState({ reportState: "sending" });
+    try {
+      const response = await fetch("/api/support/diagnostics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ page: "react-error-boundary", note: this.getDiagnosticText() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "DIAGNOSTIC_FAILED");
+      this.setState({ reportState: payload.queued ? "queued" : "sent" });
+    } catch {
+      this.setState({ reportState: "error" });
+    }
+  };
+  retryInterface = () => {
+    this.setState({ hasError: false, error: null, info: null, errorId: `VF-${Date.now().toString(36).toUpperCase()}`, reportState: "idle" });
+  };
   render() {
     if (this.state.hasError) {
       return (
@@ -82,12 +120,19 @@ class ErrorBoundary extends Component<Props, State> {
           <section className="w-full max-w-xl rounded-3xl border border-rose-200 bg-white p-8 shadow-2xl">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-xl font-black text-rose-600">!</div>
             <h2 className="mt-5 text-2xl font-black">Không thể hiển thị màn hình này</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">Dữ liệu đang được giữ nguyên. Hãy tải lại trang; nếu lỗi lặp lại, gửi nội dung bên dưới cho bộ phận hỗ trợ.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">Dữ liệu dự án vẫn được giữ nguyên. Bạn có thể thử mở lại giao diện, tải lại trang hoặc gửi báo cáo đã loại thông tin bí mật.</p>
+            <p className="mt-3 inline-flex rounded-lg bg-rose-50 px-2.5 py-1 text-xs font-black text-rose-700">Mã lỗi: {this.state.errorId}</p>
             <details className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs text-slate-600">
               <summary className="cursor-pointer font-bold">Xem chi tiết kỹ thuật</summary>
-              <pre className="mt-3 overflow-auto whitespace-pre-wrap">{this.state.error?.toString()}\n{this.state.info?.componentStack}</pre>
+              <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap">{this.getDiagnosticText()}</pre>
             </details>
-            <button type="button" onClick={() => window.location.reload()} className="mt-6 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-indigo-200">Tải lại trang</button>
+            {this.state.reportState !== "idle" && <p className={`mt-4 rounded-xl px-3 py-2 text-xs font-bold ${this.state.reportState === "sent" || this.state.reportState === "queued" ? "bg-emerald-50 text-emerald-700" : this.state.reportState === "error" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`}>{this.state.reportState === "sending" ? "Đang gửi báo cáo…" : this.state.reportState === "sent" ? "Đã gửi báo cáo chẩn đoán." : this.state.reportState === "queued" ? "Báo cáo đã được lưu trên máy để gửi lại." : "Chưa gửi được báo cáo; bạn có thể sao chép và gửi thủ công."}</p>}
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button type="button" onClick={this.retryInterface} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-indigo-200">Thử mở lại giao diện</button>
+              <button type="button" onClick={() => window.location.reload()} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-700">Tải lại trang</button>
+              <button type="button" onClick={() => void this.copyDiagnostic()} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-700">Sao chép lỗi</button>
+              <button type="button" disabled={this.state.reportState === "sending"} onClick={() => void this.sendDiagnostic()} className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 disabled:opacity-50">Gửi chẩn đoán</button>
+            </div>
           </section>
         </div>
       );
@@ -104,5 +149,6 @@ createRoot(document.getElementById('root')!).render(
       </Suspense>
       <VidiFlowDialogCenter />
     </ErrorBoundary>
+    <NotificationCenter />
   </StrictMode>,
 );
