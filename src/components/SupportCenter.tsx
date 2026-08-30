@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArchiveRestore, CheckCircle2, Download, FileJson, HardDrive, LifeBuoy, Loader2, RefreshCw, Send, ShieldCheck, Upload, X } from "lucide-react";
+import { ArchiveRestore, CheckCircle2, Download, FileJson, HardDrive, LifeBuoy, Loader2, RefreshCw, Send, ShieldCheck, Trash2, Upload, X } from "lucide-react";
 
 type SystemInfo = {
   appVersion: string;
@@ -61,7 +61,7 @@ export default function SupportCenter({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<"" | "export" | "restore" | "send">("");
+  const [busy, setBusy] = useState<"" | "export" | "restore" | "send" | "exportDiagnostics" | "clearDiagnostics">("");
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [pendingBackup, setPendingBackup] = useState<SettingsBackup | null>(null);
   const [pendingFileName, setPendingFileName] = useState("");
@@ -166,6 +166,46 @@ export default function SupportCenter({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const exportQueuedDiagnostics = async () => {
+    setBusy("exportDiagnostics");
+    setNotice(null);
+    try {
+      const response = await fetch("/api/support/diagnostics/export", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || "Không thể xuất báo cáo đang chờ.");
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `VidiFlow-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice({ tone: "ok", text: `Đã tải ${payload.reports?.length || 0} báo cáo cục bộ. Không có API key, token hoặc mật khẩu trong file.` });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Không thể xuất báo cáo đang chờ." });
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const clearQueuedDiagnostics = async () => {
+    if (!window.confirm("Xóa toàn bộ báo cáo chẩn đoán đang lưu cục bộ? Thao tác này không ảnh hưởng dự án.")) return;
+    setBusy("clearDiagnostics");
+    setNotice(null);
+    try {
+      const response = await fetch("/api/support/diagnostics/queued", { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Không thể xóa hàng đợi.");
+      setNotice({ tone: "ok", text: `Đã xóa ${payload.cleared || 0} báo cáo chẩn đoán cục bộ.` });
+      await loadSystemInfo();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Không thể xóa hàng đợi." });
+    } finally {
+      setBusy("");
+    }
+  };
   const sendDiagnostics = async () => {
     setBusy("send");
     setNotice(null);
@@ -204,7 +244,7 @@ export default function SupportCenter({ onClose }: { onClose: () => void }) {
               <div className="rounded-2xl border border-slate-200 p-4"><p className="text-[10px] font-black uppercase text-slate-400">Phiên bản</p><p className="mt-1 text-lg font-black text-slate-900">v{system.appVersion}</p><p className="text-xs text-slate-500">{system.desktopMode ? "Desktop" : "Local server"} · {system.arch}</p></div>
               <div className="rounded-2xl border border-slate-200 p-4"><p className="text-[10px] font-black uppercase text-slate-400">Bản quyền</p><p className="mt-1 text-lg font-black text-slate-900">{planLabel(system.license.plan)}</p><p className={`text-xs font-bold ${system.license.active ? "text-emerald-600" : "text-amber-600"}`}>{system.license.active ? "Đang hoạt động" : "Chưa hoạt động"}</p></div>
               <div className="rounded-2xl border border-slate-200 p-4"><p className="text-[10px] font-black uppercase text-slate-400">Cấu hình an toàn</p><p className="mt-1 text-lg font-black text-slate-900">{system.settingsFiles.filter((item) => item.ready).length}/{system.settingsFiles.length}</p><p className="text-xs text-slate-500">file sẵn sàng backup</p></div>
-              <div className="rounded-2xl border border-slate-200 p-4"><p className="text-[10px] font-black uppercase text-slate-400">Báo cáo chờ gửi</p><p className="mt-1 text-lg font-black text-slate-900">{system.pendingDiagnostics}</p><p className="text-xs text-slate-500">đã loại dữ liệu bí mật</p></div>
+              <div className="rounded-2xl border border-slate-200 p-4"><p className="text-[10px] font-black uppercase text-slate-400">Báo cáo lưu cục bộ</p><p className="mt-1 text-lg font-black text-slate-900">{system.pendingDiagnostics}</p><p className="text-xs text-slate-500">đã loại dữ liệu bí mật</p>{system.pendingDiagnostics > 0 && <div className="mt-3 flex gap-1.5"><button disabled={Boolean(busy)} onClick={() => void exportQueuedDiagnostics()} className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-sky-50 px-2 py-1.5 text-[10px] font-black text-sky-700 disabled:opacity-50"><Download className="h-3 w-3" />Tải file</button><button disabled={Boolean(busy)} onClick={() => void clearQueuedDiagnostics()} className="inline-flex items-center justify-center rounded-lg bg-rose-50 px-2 py-1.5 text-rose-700 disabled:opacity-50" aria-label="Xóa báo cáo cục bộ"><Trash2 className="h-3 w-3" /></button></div>}</div>
             </section>
           )}
 

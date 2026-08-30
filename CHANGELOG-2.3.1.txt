@@ -30,6 +30,12 @@ RELIABILITY AND PERFORMANCE
 - Expanded the React error screen with a stable error ID, retry, reload, safe copy and diagnostic submission actions.
 - Lazy-loaded Support Center and Updater, reducing the initial application bundle by about 12.5 KB.
 
+LOCAL DIAGNOSTIC CONTROL
+- Replaced raw append-only diagnostic storage with a bounded, atomic local queue.
+- Added local JSON export and user-confirmed deletion for queued diagnostics.
+- No automatic retry or background diagnostic transmission is performed.
+- Added unit tests for partial delivery bookkeeping, cleanup and payload size limits.
+
 COMPATIBILITY
 - No intended change to existing project folders, media generation, voice generation, timeline repair, resume/retry or social publishing workflows.
 - Existing unsigned update packages remain supported until signed-update enforcement is explicitly enabled.

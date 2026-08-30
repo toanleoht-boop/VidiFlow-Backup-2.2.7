@@ -88,7 +88,11 @@ await run("Support system info", async () => {
   if (!result.ok || result.system?.appVersion !== expectedVersion || !Array.isArray(result.system?.settingsFiles)) throw new Error(JSON.stringify(result));
   return { version: result.system.appVersion, settingsFiles: result.system.settingsFiles.length, pendingDiagnostics: result.system.pendingDiagnostics };
 });
-await run("Safe settings backup", async () => {
+await run("Local diagnostic export", async () => {
+  const result = await json("/api/support/diagnostics/export");
+  if (result.product !== "vidiflow-oneclick" || result.schemaVersion !== 1 || !Array.isArray(result.reports)) throw new Error(JSON.stringify(result));
+  return { reports: result.reports.length };
+});await run("Safe settings backup", async () => {
   const result = await json("/api/support/settings-backup");
   const serialized = JSON.stringify(result);
   if (result.product !== "vidiflow-oneclick" || result.schemaVersion !== 1 || !result.files?.["automation-default.json"]) throw new Error(serialized);

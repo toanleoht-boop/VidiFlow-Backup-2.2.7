@@ -23,7 +23,7 @@ Security
 VidiFlow masks configured provider secrets in its interface and API responses where supported and validates local-file requests. No software can guarantee absolute security; users should keep Windows, Chrome and VidiFlow updated and avoid sharing license keys or profiles.
 
 Support diagnostics and settings backup
-When the user submits a support report, VidiFlow sends a redacted technical summary and the note entered by the user. If the support service is unavailable, the report is queued locally. Settings backup uses an explicit allowlist and excludes license records, provider secrets, Telegram tokens, browser cookies and project media. The user controls where the exported backup file is saved.
+When the user submits a support report, VidiFlow sends a redacted technical summary and the note entered by the user. If the support service is unavailable, the report is queued locally. Queued reports are not transmitted automatically; the user can export them for review or delete them from Support Center. Settings backup uses an explicit allowlist and excludes license records, provider secrets, Telegram tokens, browser cookies and project media. The user controls where the exported backup file is saved.
 
 Questions
 Use the support route published at https://vidiflow.site. This notice should be updated whenever providers, collected fields, retention rules or the licensing backend materially change.

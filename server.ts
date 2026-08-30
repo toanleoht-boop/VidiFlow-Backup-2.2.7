@@ -19,6 +19,7 @@ import {
 } from "./src/server/security/localRequestSecurity.js";
 import { canUseAutomationMode, type LicensePlan } from "./src/constants/licenseEntitlements.js";
 import { createSettingsBackup, getSettingsFileStatus, restoreSettingsBackup } from "./src/server/services/settingsBackupService.js";
+import { clearDiagnosticQueue, countQueuedDiagnostics, enqueueDiagnostic, readQueuedDiagnostics, type DiagnosticPayload } from "./src/server/services/diagnosticQueueService.js";
 
 // Secrets must live outside the installed application directory. The desktop
 // updater replaces that directory, which previously made customer API keys
@@ -971,14 +972,8 @@ try {
   } catch (error: any) { return res.status(502).json({ error: "UPDATE_INSTALL_FAILED", detail: String(error?.message || "").slice(0, 160) }); }
 });
 
-const getPendingDiagnosticCount = () => {
-  try {
-    const file = path.join(licenseDataDir, "diagnostics-pending.jsonl");
-    return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).length;
-  } catch {
-    return 0;
-  }
-};
+const diagnosticsQueueFile = path.join(licenseDataDir, "diagnostics-pending.jsonl");
+const getPendingDiagnosticCount = () => countQueuedDiagnostics(diagnosticsQueueFile);
 
 const buildSupportSystemInfo = () => {
   const local = readLicense();
@@ -1043,9 +1038,20 @@ function redactedDiagnostic(value: unknown): unknown {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => !/(key|token|secret|password)/i.test(key)).map(([key, item]) => [key, redactedDiagnostic(item)]));
   return value;
 }
+app.get("/api/support/diagnostics/export", (_req, res) => {
+  const reports = readQueuedDiagnostics(diagnosticsQueueFile);
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader("Content-Disposition", `attachment; filename="VidiFlow-diagnostics-${stamp}.json"`);
+  return res.json({ schemaVersion: 1, product: "vidiflow-oneclick", exportedAt: new Date().toISOString(), reports });
+});
+
+app.delete("/api/support/diagnostics/queued", (_req, res) => {
+  return res.json({ ok: true, cleared: clearDiagnosticQueue(diagnosticsQueueFile) });
+});
+
 app.post("/api/support/diagnostics", async (req, res) => {
   const local = readLicense();
-  const payload = {
+  const payload: DiagnosticPayload = {
     app_version: APP_VERSION,
     platform: process.platform,
     arch: process.arch,
@@ -1065,9 +1071,9 @@ app.post("/api/support/diagnostics", async (req, res) => {
     return res.json({ ok: true });
   } catch {
     // Preserve a redacted local copy so no report is silently lost while the
-    // hosting server is unavailable. It contains no provider credential.
-    try { fs.mkdirSync(licenseDataDir, { recursive: true }); fs.appendFileSync(path.join(licenseDataDir, "diagnostics-pending.jsonl"), JSON.stringify(payload) + "\n", "utf8"); } catch {}
-    return res.status(202).json({ ok: true, queued: true, message: "Báo cáo đã được lưu cục bộ và sẽ gửi lại khi máy chủ hỗ trợ hoạt động." });
+    // hosting server is unavailable. Exporting or clearing it requires a user action.
+    try { enqueueDiagnostic(diagnosticsQueueFile, payload); } catch {}
+    return res.status(202).json({ ok: true, queued: true, message: "Báo cáo đã được lưu cục bộ. Bạn có thể tải file để tự kiểm tra và gửi thủ công." });
   }
 });
 
