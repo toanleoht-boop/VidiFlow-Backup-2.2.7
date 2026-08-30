@@ -7165,8 +7165,58 @@ app.post("/api/render-ffmpeg", async (req, res) => {
     if (timeline.length !== images.length) {
       throw new Error(`Timeline có ${timeline.length} đoạn nhưng media có ${images.length} file. Hãy căn voice lại; tool sẽ không chia đều vì có thể làm sai câu thoại.`);
     }
-    if (timelineIsSeverelySkewed) {
-      throw new Error("Timeline lệch nặng: một media đang chiếm quá 55% voice. Hãy chạy căn voice Whisper lại trước khi render.");
+    if (timelineIsSeverelySkewed && !retainVideoAudio) {
+      const skewedIndex = timeline.reduce((bestIndex: number, entry: any, index: number) =>
+        Number(entry?.durationMs || 0) > Number(timeline[bestIndex]?.durationMs || 0) ? index : bestIndex, 0);
+      const skewedRatio = Math.round(longestTimelineSlot / timelineDurationTotal * 100);
+      sendLog(`Phát hiện cảnh ${skewedIndex + 1} đang chiếm ${skewedRatio}% voice; tool tự căn Whisper lại một lần trước khi render.`);
+      let repairScenes: TimelineScene[] = timeline.map((entry: any, index: number) => ({
+        id: Number(entry?.index || index + 1), code: String(entry?.code || "").trim() || undefined,
+        text: String(entry?.text || "").trim(),
+      }));
+      if (repairScenes.some(scene => !scene.text)) {
+        const roots = Array.from(new Set([path.resolve(outputDir), voiceDir ? path.dirname(path.resolve(voiceDir)) : ""].filter(Boolean)));
+        const scriptPath = roots.flatMap(root => ["step3_dialogues.txt", "script.txt", "raw_script.txt"].map(name => path.join(root, name)))
+          .find(candidate => fs.existsSync(candidate));
+        if (scriptPath) {
+          const scriptScenes = readTimelineScenes(scriptPath);
+          if (scriptScenes.length === timeline.length) repairScenes = scriptScenes;
+        }
+      }
+      if (repairScenes.some(scene => !scene.text)) {
+        throw new Error(`Timeline lệch tại cảnh ${skewedIndex + 1} (${skewedRatio}%) nhưng manifest cũ thiếu câu thoại để tự căn Whisper. Hãy chạy Cắt voice một lần.`);
+      }
+      const repairedCuts = await alignVoiceWithWhisper(sourceAudio, repairScenes, sourceDurationMs, sendLog);
+      let repairedTimeline = repairScenes.map((scene, index) => {
+        const startMs = index === 0 ? 0 : Math.max(0, Math.round(repairedCuts[index].start * 1000));
+        const nextStartMs = index < repairScenes.length - 1
+          ? Math.max(startMs + 100, Math.round(repairedCuts[index + 1].start * 1000)) : sourceDurationMs;
+        return { ...timeline[index], index: index + 1, code: scene.code, text: scene.text, startMs,
+          durationMs: Math.max(100, nextStartMs - startMs),
+          speechStartMs: Math.max(0, Math.round(repairedCuts[index].start * 1000)),
+          speechEndMs: Math.min(sourceDurationMs, Math.round(repairedCuts[index].end * 1000)) };
+      });
+      const repairedTotal = repairedTimeline.reduce((sum: number, entry: any) => sum + Number(entry.durationMs || 0), 0);
+      const repairedLongest = repairedTimeline.reduce((maximum: number, entry: any) => Math.max(maximum, Number(entry.durationMs || 0)), 0);
+      if (repairedTimeline.length > 1 && repairedTotal > 0 && repairedLongest / repairedTotal > 0.55) {
+        sendLog("Whisper vẫn tạo một cảnh quá dài; đang chuyển sang căn theo độ dài câu thoại để tránh treo lặp.");
+        const safeDurations = allocateTimelineDurations(sourceDurationMs, repairScenes);
+        let cursorMs = 0;
+        repairedTimeline = repairedTimeline.map((entry: any, index: number) => {
+          const startMs = cursorMs;
+          const durationMs = index === repairedTimeline.length - 1
+            ? Math.max(100, sourceDurationMs - cursorMs) : Math.max(100, safeDurations[index]);
+          cursorMs += durationMs;
+          return { ...entry, startMs, durationMs, speechStartMs: startMs, speechEndMs: startMs + durationMs };
+        });
+      }
+      const backupManifestPath = path.join(path.dirname(manifestPath), `voice_manifest.skewed-${Date.now()}.json`);
+      try { fs.copyFileSync(manifestPath, backupManifestPath); } catch {}
+      timeline = repairedTimeline;
+      fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, timelineVersion: 4,
+        alignmentMode: "whisper-auto-repair", preservesOriginalSilence: true, sourceAudio,
+        totalDurationMs: sourceDurationMs, repairedAt: new Date().toISOString(), scenes: timeline }, null, 2), "utf8");
+      sendLog(`Đã tự sửa manifest ${timeline.length} cảnh và tiếp tục render; bản lệch cũ được giữ tại ${path.basename(backupManifestPath)}.`);
     }
     const normalizePromptCode = (value: unknown) => String(value || "")
       .toUpperCase()

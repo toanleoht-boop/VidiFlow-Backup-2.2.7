@@ -943,10 +943,34 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
               .locator('button[aria-haspopup="menu"]')
               .filter({ has: page.locator("i").filter({ hasText: /crop_(?:16_9|9_16)|crop_free/i }) })
               .last();
-            const legacySettingsBtn = page.locator("button").filter({
-              has: page.locator("i").filter({ hasText: /tune|crop_|image|video/i }),
-            }).filter({ hasText: /tune|1x|x2|x3|Video|Hình ảnh|Image/i }).last();
+            const legacySettingsBtn = page.locator('button[aria-haspopup="menu"]').filter({
+              has: page.locator("i").filter({ hasText: /crop_|image|video/i }),
+            }).filter({ hasText: /1x|x2|x3|Video|Hình ảnh|Image/i }).last();
 
+            const hasVisibleMediaSettings = async () =>
+              await compactSettingsBtn.isVisible().catch(() => false) ||
+              await modelSettingsBtn.isVisible().catch(() => false) ||
+              await flowMediaSettingsBtn.isVisible().catch(() => false) ||
+              await legacySettingsBtn.isVisible().catch(() => false);
+
+            // New Flow projects can open in Agent mode. In that state the
+            // tune-icon Settings control belongs to the agent, not media
+            // generation. The exact Agent button toggles back to the media
+            // composer, where Video/Image and Frame settings are available.
+            if (!await hasVisibleMediaSettings()) {
+              const agentModeToggle = page.locator('button').filter({
+                hasText: /^\s*Tác nhân\s*$|^\s*Agent\s*$/i,
+              }).last();
+              const agentSettingsButton = page.locator('button').filter({
+                has: page.locator('i').filter({ hasText: /^tune$/i }),
+              }).filter({ hasText: /Cài đặt|Settings/i }).last();
+              if (await agentModeToggle.isVisible().catch(() => false) &&
+                  await agentSettingsButton.isVisible().catch(() => false)) {
+                appLog('[Playwright] Flow opened in Agent mode; switching to the media composer.');
+                await agentModeToggle.click({ force: true });
+                await page.waitForTimeout(700);
+              }
+            }
             let actualConfigBtn = compactSettingsBtn;
             if (!await actualConfigBtn.isVisible()) actualConfigBtn = modelSettingsBtn;
             if (!await actualConfigBtn.isVisible()) actualConfigBtn = flowMediaSettingsBtn;
@@ -1005,11 +1029,17 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
 
               // 3. Chọn Số lượng tạo (x2 / 1x)
               const countVal = visualConfig?.generateCount || 1;
-              const countLabel = countVal === 1 ? '1x' : `x${countVal}`; 
-              const countTab = flowTabs.filter({ hasText: new RegExp(countLabel, "i") }).last();
-              if (await countTab.isVisible()) {
-                await countTab.click();
-                await getPlaywrightPage()!.waitForTimeout(300);
+              const countLabel = `x${countVal}`;
+              const countTab = flowTabs
+                .filter({ hasText: new RegExp(`^\\s*${countLabel}\\s*$`, "i") })
+                .last();
+              if (!await countTab.isVisible()) {
+                throw new Error(`Flow generation count ${countLabel} is not available.`);
+              }
+              await countTab.click();
+              await getPlaywrightPage()!.waitForTimeout(300);
+              if (await countTab.getAttribute('aria-selected') !== 'true') {
+                throw new Error(`Flow did not select generation count ${countLabel}.`);
               }
 
               // 3.5. Chọn Thời lượng (chỉ hiển thị khi là video)
@@ -1043,7 +1073,11 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
                   (left, right) => right.length - left.length,
                 );
                 const normalizeModelLabel = (value: string) =>
-                  value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+                  value
+                    .replace(/Omni\s*1\.1\s*Flash/gi, "Omni Flash")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toLocaleLowerCase();
                 const resolveKnownModel = (value: string) => {
                   const normalizedValue = normalizeModelLabel(value);
                   return knownModels.find((model) =>
@@ -1063,29 +1097,34 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
                   if (!optionBtn && candidateModel === targetEngine) optionBtn = candidate;
                 }
 
+                const currentModelText = await engineDropdownBtn.innerText().catch(() => "");
+                const currentEngine = resolveKnownModel(currentModelText);
                 if (!optionBtn || !(await optionBtn.isVisible())) {
                   await getPlaywrightPage()!.keyboard.press("Escape").catch(() => {});
-                  const availableText = [...availableModels].join(", ") || "không đọc được danh sách model";
-                  throw new Error(
-                    `${flowModelSelectionErrorPrefix} Model "${targetEngine}" không có trên tài khoản Flow hiện tại. ` +
-                    `Tool không tự chuyển sang model khác. Model đang có: ${availableText}.`,
-                  );
-                }
+                  if (currentEngine !== targetEngine) {
+                    const availableText = [...availableModels].join(", ") || "không đọc được danh sách model";
+                    throw new Error(
+                      `${flowModelSelectionErrorPrefix} Model "${targetEngine}" không có trên tài khoản Flow hiện tại. ` +
+                      `Tool không tự chuyển sang model khác. Model đang có: ${availableText}.`,
+                    );
+                  }
+                  appLog(`[Playwright] Flow model already selected and verified: ${targetEngine}`);
+                } else {
+                  await optionBtn.click({ force: true });
+                  await getPlaywrightPage()!.waitForTimeout(500);
 
-                await optionBtn.click({ force: true });
-                await getPlaywrightPage()!.waitForTimeout(500);
-
-                // Read the selected value back from the trigger. This prevents a
-                // changed Flow UI from silently generating with the wrong model.
-                const selectedModelText = await engineDropdownBtn.innerText().catch(() => "");
-                const selectedEngine = resolveKnownModel(selectedModelText);
-                if (selectedEngine !== targetEngine) {
-                  throw new Error(
-                    `${flowModelSelectionErrorPrefix} Đã yêu cầu "${targetEngine}" nhưng Flow đang hiển thị ` +
-                    `"${selectedEngine || selectedModelText || "không xác định"}". Đã dừng để tránh chạy sai model.`,
-                  );
+                  // Read the selected value back from the trigger. This prevents a
+                  // changed Flow UI from silently generating with the wrong model.
+                  const selectedModelText = await engineDropdownBtn.innerText().catch(() => "");
+                  const selectedEngine = resolveKnownModel(selectedModelText);
+                  if (selectedEngine !== targetEngine) {
+                    throw new Error(
+                      `${flowModelSelectionErrorPrefix} Đã yêu cầu "${targetEngine}" nhưng Flow đang hiển thị ` +
+                      `"${selectedEngine || selectedModelText || "không xác định"}". Đã dừng để tránh chạy sai model.`,
+                    );
+                  }
+                  appLog(`[Playwright] Flow model verified: ${targetEngine}`);
                 }
-                appLog(`[Playwright] Flow model verified: ${targetEngine}`);
               }
 
               // Select duration after the model. Both Flow Lite variants expose
@@ -1127,10 +1166,19 @@ export async function generateImageWithPlaywright(options: ImageGeneratorOptions
               if (await saveBtn.isVisible()) {
                 await saveBtn.click();
               } else {
-                await actualConfigBtn.click({ force: true }).catch(() => {});
-                await getPlaywrightPage()!.mouse.click(0, 0).catch(() => {});
+                await getPlaywrightPage()!.keyboard.press("Escape").catch(() => {});
               }
-              await getPlaywrightPage()!.waitForTimeout(1000);
+              await getPlaywrightPage()!.waitForTimeout(500);
+              const settingsStillOpen = flowTabs
+                .filter({ hasText: /Khung hình|Frames|Thành phần|Components/i })
+                .last();
+              if (await settingsStillOpen.isVisible().catch(() => false)) {
+                await getPlaywrightPage()!.keyboard.press("Escape").catch(() => {});
+                await getPlaywrightPage()!.waitForTimeout(500);
+              }
+              if (await settingsStillOpen.isVisible().catch(() => false)) {
+                throw new Error("Flow media settings did not close.");
+              }
 
               lastPlaywrightConfigState = currentConfigState;
               appLog(BACKEND_MESSAGES.PLAYWRIGHT_CONFIG_SUCCESS);
